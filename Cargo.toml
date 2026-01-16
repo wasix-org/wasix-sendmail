@@ -29,16 +29,17 @@ uuid = { version = "1.0", features = [
     "v4",
     "getrandom",
 ], default-features = false }
+getrandom = "0.2.15"
 
 # Pin wasix-specific crate versions so patches work
-socket2 = "0.5.5"
-libc = "0.2.152"
-rustls = "0.22.2"
-ring = "0.17.7"
+socket2 = "=0.5.5"
+libc = "=0.2.169"
+rustls = "=0.22.2"
+ring = "=0.17.7"
 
 [patch.crates-io]
 socket2 = { git = "https://github.com/wasix-org/socket2.git", branch = "v0.5.5" }
-libc = { git = "https://github.com/wasix-org/libc.git", branch = "v0.2.152" }
+libc = { git = "https://github.com/wasix-org/libc.git", branch = "wasix-0.2.169" }
 rustls = { git = "https://github.com/wasix-org/rustls.git", branch = "v0.22.2" }
 ring = { git = "https://github.com/wasix-org/ring.git", branch = "0.17.7" }
-getrandom = { git = "https://github.com/wasix-org/getrandom.git", branch = "wasix-0.3.3" }
+getrandom = { git = "https://github.com/wasix-org/getrandom.git", branch = "wasix-0.2.15" }

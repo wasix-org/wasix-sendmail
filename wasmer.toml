@@ -1,0 +1,17 @@
+[package]
+name = "wasmer/sendmail"
+version = "0.1.0"
+entrypoint = "sendmail"
+
+[[module]]
+name = "sendmail"
+source = "./target/wasm32-wasmer-wasi/release/sendmail.wasm"
+abi = "wasi"
+
+[module.interfaces]
+wasi = "0.1.0-unstable"
+
+[[command]]
+name = "sendmail"
+module = "sendmail"
+runner = "wasi"
