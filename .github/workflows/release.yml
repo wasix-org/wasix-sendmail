@@ -136,10 +136,12 @@ jobs:
 
   build-webc:
     name: Build the WebC package
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/build-webc.yml
   
   publish-webc:
-    name: Release
+    name: Publish the WebC package
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs: [verify-version, build-webc]
     steps:      
@@ -160,10 +162,9 @@ jobs:
 
   publish-crates-io:
     name: Publish to crates.io
-    needs: [verify-version, publish-webc]
-    runs-on: ubuntu-latest
-    # Do NOT run on Pull Requests
     if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs: [verify-version, publish-webc]
     steps:
       - uses: actions/checkout@v4
 
@@ -179,10 +180,9 @@ jobs:
 
   publish-release:
     name: Create Release
+    if: github.event_name != 'pull_request'
     needs: [build-webc, publish-crates-io]
     runs-on: ubuntu-latest
-    # Do NOT run on Pull Requests
-    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
