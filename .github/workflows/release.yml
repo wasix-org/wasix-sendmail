@@ -158,7 +158,7 @@ jobs:
       - name: Publish WebC
         run: |
           wasmer package unpack sendmail.webc --out-dir sendmail
-          wasmer package publish sendmail --registry wasmer.io --token "${{ secrets.WASMER_TOKEN }}"
+          wasmer package publish sendmail --registry wasmer.io --token "${{ secrets.WASMER_TOKEN }}" --namespace sendmail --name sendmail
 
   # TODO: Uncomment this when we no longer rely on git dependencies
   # publish-crates-io:
