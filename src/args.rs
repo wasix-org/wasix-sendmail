@@ -1,10 +1,10 @@
-use clap::Parser;
-
 use crate::parser::EmailAddress;
+use clap::Parser;
+use std::str::FromStr;
 
 /// Parse an email address from a string for clap
 fn parse_email(s: &str) -> Result<EmailAddress, String> {
-    crate::parser::parse_email_address(s).map_err(|e| e.to_string())
+    EmailAddress::from_str(s).map_err(|_| "Invalid email address: ".to_string() + s)
 }
 
 #[derive(Parser, Debug)]

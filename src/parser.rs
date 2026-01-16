@@ -68,11 +68,6 @@ pub fn parse_email_headers(email: &str) -> Vec<HeaderField> {
     headers
 }
 
-/// Parse and validate an email address
-pub fn parse_email_address(email: &str) -> Result<EmailAddress, ParseError> {
-    EmailAddress::from_str(email).map_err(|_| ParseError::InvalidEmail(email.to_string()))
-}
-
 /// Parse a header value as mailboxes (address list) and extract email addresses.
 ///
 /// This function parses header values like "To", "Cc", "Bcc" that contain mailbox lists.

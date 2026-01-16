@@ -1,5 +1,7 @@
-use std::io::{Read, Write};
-
+use std::{
+    io::{Read, Write},
+    str::FromStr,
+};
 pub mod args;
 pub mod backend;
 pub mod logger;
@@ -85,8 +87,7 @@ pub fn run_sendmail(
         });
 
     let envelope_from = cli_args.from.or(header_from).unwrap_or_else(|| {
-        parser::parse_email_address("nobody@localhost")
-            .expect("Failed to parse default from address")
+        EmailAddress::from_str("nobody@localhost").expect("Failed to parse default from address")
     });
 
     let missing_headers =
@@ -187,7 +188,9 @@ fn generate_message_id(from: &EmailAddress) -> String {
 mod tests {
     use super::{generate_missing_headers, prepend_headers};
     use crate::backend::{EmailBackend, FileBackend};
-    use crate::parser::{parse_email_address, parse_email_headers};
+    use crate::parser::parse_email_headers;
+    use email_address::EmailAddress;
+    use std::str::FromStr;
 
     #[test]
     fn test_file_backend() {
@@ -205,7 +208,7 @@ mod tests {
     fn test_add_missing_headers_all_missing() {
         let raw_email = "Subject: Test\n\nBody content";
         let headers = parse_email_headers(raw_email);
-        let from = parse_email_address("sender@example.com").unwrap();
+        let from = EmailAddress::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
         let result = prepend_headers(raw_email, &missing);
 
@@ -220,9 +223,9 @@ mod tests {
     fn test_add_missing_headers_from_exists() {
         let raw_email = "From: existing@example.com\nSubject: Test\n\nBody";
         let headers = parse_email_headers(raw_email);
-        let from = parse_email_address("sender@example.com").unwrap();
+        let from = EmailAddress::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
-        let result = prepend_headers(raw_email, &missing);
+        let result: String = prepend_headers(raw_email, &missing);
 
         // Should not add From header since it exists
         assert!(!result.contains("From: sender@example.com"));
@@ -235,7 +238,7 @@ mod tests {
     fn test_add_missing_headers_date_exists() {
         let raw_email = "Date: Mon, 1 Jan 2024 12:00:00 +0000\nSubject: Test\n\nBody";
         let headers = parse_email_headers(raw_email);
-        let from = parse_email_address("sender@example.com").unwrap();
+        let from = EmailAddress::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
         let result = prepend_headers(raw_email, &missing);
 
@@ -250,7 +253,7 @@ mod tests {
     fn test_add_missing_headers_message_id_exists() {
         let raw_email = "Message-ID: <test@example.com>\nSubject: Test\n\nBody";
         let headers = parse_email_headers(raw_email);
-        let from = parse_email_address("sender@example.com").unwrap();
+        let from = EmailAddress::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
         let result = prepend_headers(raw_email, &missing);
 
@@ -265,7 +268,7 @@ mod tests {
     fn test_add_missing_headers_no_empty_line() {
         let raw_email = "Subject: Test\nBody content";
         let headers = parse_email_headers(raw_email);
-        let from = parse_email_address("sender@example.com").unwrap();
+        let from = EmailAddress::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
         let result = prepend_headers(raw_email, &missing);
 
@@ -278,7 +281,7 @@ mod tests {
     fn test_add_missing_headers_with_fullname() {
         let raw_email = "Subject: Test\n\nBody content";
         let headers = parse_email_headers(raw_email);
-        let from = parse_email_address("sender@example.com").unwrap();
+        let from = EmailAddress::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, Some("John Doe"));
         let result = prepend_headers(raw_email, &missing);
 
@@ -291,7 +294,7 @@ mod tests {
     fn test_add_missing_headers_with_fullname_escapes_quotes() {
         let raw_email = "Subject: Test\n\nBody content";
         let headers = parse_email_headers(raw_email);
-        let from = parse_email_address("sender@example.com").unwrap();
+        let from = EmailAddress::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, Some("John \"Johnny\" Doe"));
         let result = prepend_headers(raw_email, &missing);
 
