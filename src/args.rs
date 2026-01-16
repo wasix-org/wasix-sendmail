@@ -34,7 +34,7 @@ pub struct SendmailArgs {
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     pub verbosity: u8,
 
-    /// Recipient email addresses
+    /// Recipient email addresses (ignored when reading recipients from headers)
     #[arg(value_name = "RECIPIENT", value_parser = parse_email)]
     pub recipients: Vec<EmailAddress>,
 }
