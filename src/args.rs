@@ -26,6 +26,10 @@ pub struct SendmailArgs {
     #[arg(short = 'f', long = "from", value_name = "ADDRESS", value_parser = parse_email)]
     pub from: Option<EmailAddress>,
 
+    /// Set the full name (display name) for the From header
+    #[arg(short = 'F', long = "fullname", value_name = "NAME")]
+    pub fullname: Option<String>,
+
     /// Increase verbosity (can be used multiple times: -v, -vv, -vvv)
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
     pub verbosity: u8,

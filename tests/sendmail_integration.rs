@@ -196,3 +196,112 @@ fn rfc5322_folded_to_header_is_unfolded() {
 
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn common_f_flag_sets_fullname_in_from_header() {
+    let out = unique_temp_file("common_f_flag_sets_fullname_in_from_header");
+    let envs = envs_for_file_backend(&out);
+
+    let args = vec![
+        "sendmail".to_string(),
+        "-f".to_string(),
+        "sender@example.com".to_string(),
+        "-F".to_string(),
+        "John Doe".to_string(),
+        "recipient@example.com".to_string(),
+    ];
+    let email = "Subject: Test\n\nTest body";
+
+    let (rc, path) = run_with_file_backend(args, envs, email);
+    assert_eq!(rc, 0);
+
+    let content = std::fs::read_to_string(&path).expect("output file should exist");
+    assert!(content.contains("Envelope-From: sender@example.com"));
+    assert!(content.contains("Envelope-To: recipient@example.com"));
+    // The From header should include the fullname
+    assert!(content.contains("From: \"John Doe\" <sender@example.com>"));
+    assert!(content.contains("Subject: Test"));
+    assert!(content.contains("Test body"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn common_f_flag_without_f_flag_uses_default_from() {
+    let out = unique_temp_file("common_f_flag_without_f_flag_uses_default_from");
+    let envs = envs_for_file_backend(&out);
+
+    let args = vec![
+        "sendmail".to_string(),
+        "-F".to_string(),
+        "Jane Smith".to_string(),
+        "recipient@example.com".to_string(),
+    ];
+    let email = "Subject: Test\n\nTest body";
+
+    let (rc, path) = run_with_file_backend(args, envs, email);
+    assert_eq!(rc, 0);
+
+    let content = std::fs::read_to_string(&path).expect("output file should exist");
+    // Should use default from address
+    assert!(content.contains("Envelope-From: nobody@localhost"));
+    // The From header should include the fullname with default address
+    assert!(content.contains("From: \"Jane Smith\" <nobody@localhost>"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn common_f_flag_escapes_quotes_in_fullname() {
+    let out = unique_temp_file("common_f_flag_escapes_quotes_in_fullname");
+    let envs = envs_for_file_backend(&out);
+
+    let args = vec![
+        "sendmail".to_string(),
+        "-f".to_string(),
+        "sender@example.com".to_string(),
+        "-F".to_string(),
+        "John \"Johnny\" Doe".to_string(),
+        "recipient@example.com".to_string(),
+    ];
+    let email = "Subject: Test\n\nTest body";
+
+    let (rc, path) = run_with_file_backend(args, envs, email);
+    assert_eq!(rc, 0);
+
+    let content = std::fs::read_to_string(&path).expect("output file should exist");
+    // The From header should properly escape quotes
+    assert!(content.contains("From: \"John \\\"Johnny\\\" Doe\" <sender@example.com>"));
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn uncommon_f_flag_does_not_override_existing_from_header() {
+    let out = unique_temp_file("uncommon_f_flag_does_not_override_existing_from_header");
+    let envs = envs_for_file_backend(&out);
+
+    let args = vec![
+        "sendmail".to_string(),
+        "-f".to_string(),
+        "envelope@example.com".to_string(),
+        "-F".to_string(),
+        "CLI Fullname".to_string(),
+        "recipient@example.com".to_string(),
+    ];
+    // Email already has a From header, so -F should not add a new one
+    let email = "From: \"Header Fullname\" <header@example.com>\nSubject: Test\n\nTest body";
+
+    let (rc, path) = run_with_file_backend(args, envs, email);
+    assert_eq!(rc, 0);
+
+    let content = std::fs::read_to_string(&path).expect("output file should exist");
+    // Envelope should use CLI -f flag
+    assert!(content.contains("Envelope-From: envelope@example.com"));
+    // From header should remain as in the original email (not replaced)
+    assert!(content.contains("From: \"Header Fullname\" <header@example.com>"));
+    // Should not contain the CLI fullname
+    assert!(!content.contains("CLI Fullname"));
+
+    let _ = std::fs::remove_file(&path);
+}
