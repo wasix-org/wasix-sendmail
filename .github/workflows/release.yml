@@ -194,13 +194,13 @@ jobs:
 
       - name: Move artifacts to root
         run: |
-          find artifacts -name '*.tar.gz' -exec mv {} . \;
+          find artifacts -name '*.webc' -exec mv {} . \;
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            wasixcc-*.tar.gz
+            sendmail.webc
           draft: true
           prerelease: false
           generate_release_notes: true
