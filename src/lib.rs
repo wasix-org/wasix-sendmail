@@ -99,10 +99,7 @@ pub fn run_sendmail(
 
 /// Generate missing required headers (From:, Date:, Message-ID:) based on existing headers.
 /// Returns a vector of header strings to add.
-fn generate_missing_headers(
-    headers: &[parser::HeaderField],
-    from: &EmailAddress,
-) -> Vec<String> {
+fn generate_missing_headers(headers: &[parser::HeaderField], from: &EmailAddress) -> Vec<String> {
     let mut headers_to_add = Vec::new();
 
     if !parser::has_header(headers, "From") {
