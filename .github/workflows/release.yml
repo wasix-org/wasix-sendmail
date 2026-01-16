@@ -1,0 +1,205 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify-version:
+    name: Verify Version Consistency
+    runs-on: ubuntu-latest
+    # Run on tag pushes, OR PRs where the source branch is release/*
+    if: |
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/'))
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag or branch
+        id: extract
+        run: |
+          if [ "$GITHUB_EVENT_NAME" == "pull_request" ]; then
+            # --- Pull Request Logic ---
+            # Get version from the source branch name (e.g., release/0.2.5)
+            if [ -z "$GITHUB_HEAD_REF" ]; then
+              echo "ERROR: GITHUB_HEAD_REF is empty"
+              exit 1
+            fi
+
+            BRANCH="${GITHUB_HEAD_REF}"
+            
+            # Ensure branch matches release/*
+            if [[ ! "$BRANCH" =~ ^release/ ]]; then
+              echo "ERROR: Branch name must match 'release/*' (e.g., release/0.2.5)"
+              exit 1
+            fi
+
+            # Extract version by removing 'release/' prefix
+            VERSION="${BRANCH#release/}"
+            echo "Extracted version from PR branch: $VERSION"
+
+          else
+            # --- Tag Logic ---
+            # Get the tag name from the ref
+            if [ -z "$GITHUB_REF" ]; then
+              echo "ERROR: GITHUB_REF is empty"
+              exit 1
+            fi
+
+            # Check if this is a tag reference
+            if [[ ! "$GITHUB_REF" =~ refs/tags/ ]]; then
+              echo "ERROR: This workflow must be triggered by a tag push (refs/tags/v*)"
+              echo "Current GITHUB_REF: $GITHUB_REF"
+              exit 1
+            fi
+
+            TAG="${GITHUB_REF#refs/tags/}"
+            
+            # Verify tag starts with 'v' and follows semantic versioning
+            if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              echo "ERROR: Tag must be in the format 'vX.Y.Z' (e.g., v0.2.5)"
+              echo "Current tag: $TAG"
+              exit 1
+            fi
+
+            # Remove 'v' prefix to get version
+            VERSION="${TAG#v}"
+            echo "Extracted version from tag: $VERSION"
+          fi
+
+          # --- Common Validation ---
+          # Ensure the extracted version is valid semantic versioning (X.Y.Z)
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: Extracted version '$VERSION' is not valid (format X.Y.Z)"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Verify Cargo.toml version
+        run: |
+          VERSION="${{ steps.extract.outputs.version }}"
+          if [ ! -f "Cargo.toml" ]; then
+            echo "ERROR: Cargo.toml not found"
+            exit 1
+          fi
+          CARGO_VERSION=$(grep -E '^\s*version\s*=\s*' Cargo.toml | head -1 | sed -E 's/.*version\s*=\s*["'"'"']([^"'"'"']+)["'"'"'].*/\1/')
+          echo "Cargo.toml version: $CARGO_VERSION"
+          echo "Expected version: $VERSION"
+
+          if [ -z "$CARGO_VERSION" ]; then
+            echo "ERROR: Could not extract version from Cargo.toml"
+            exit 1
+          fi
+
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "ERROR: Cargo.toml version ($CARGO_VERSION) does not match extracted version ($VERSION)"
+            exit 1
+          fi
+          echo "✓ Cargo.toml version matches"
+
+      - name: Verify wasmer.toml version
+        run: |
+          VERSION="${{ steps.extract.outputs.version }}"
+          if [ ! -f "wasmer.toml" ]; then
+            echo "ERROR: wasmer.toml not found"
+            exit 1
+          fi
+          WASMER_VERSION=$(grep -E '^\s*version\s*=\s*' wasmer.toml | head -1 | sed -E 's/.*version\s*=\s*["'"'"']([^"'"'"']+)["'"'"'].*/\1/')
+          echo "wasmer.toml version: $WASMER_VERSION"
+          echo "Expected version: $VERSION"
+
+          if [ -z "$WASMER_VERSION" ]; then
+            echo "ERROR: Could not extract version from wasmer.toml"
+            exit 1
+          fi
+
+          if [ "$WASMER_VERSION" != "$VERSION" ]; then
+            echo "ERROR: wasmer.toml version ($WASMER_VERSION) does not match extracted version ($VERSION)"
+            exit 1
+          fi
+          echo "✓ wasmer.toml version matches"
+
+
+      - name: Version verification complete
+        run: |
+          echo "✓ All version checks passed for version ${{ steps.extract.outputs.version }}"
+
+  build-webc:
+    name: Build the WebC package
+    uses: ./.github/workflows/build-webc.yml
+  
+  publish-webc:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [verify-version, build-webc]
+    steps:      
+      - name: Download WebC artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sendmail.webc
+
+      - name: Install Wasmer
+        run: |
+          curl https://get.wasmer.io -sSfL | sh
+          echo "$HOME/.wasmer/bin" >> $GITHUB_PATH
+      
+      - name: Publish WebC
+        run: |
+          wasmer package unpack sendmail.webc --out-dir sendmail
+          wasmer package publish sendmail --registry wasmer.io --token "${{ secrets.WASMER_TOKEN }}"
+
+  publish-crates-io:
+    name: Publish to crates.io
+    needs: [verify-version, publish-webc]
+    runs-on: ubuntu-latest
+    # Do NOT run on Pull Requests
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          echo "Publishing wasixcc version ${{ needs.verify-version.outputs.version }} to crates.io"
+          cargo publish
+
+  publish-release:
+    name: Create Release
+    needs: [build-webc, publish-crates-io]
+    runs-on: ubuntu-latest
+    # Do NOT run on Pull Requests
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move artifacts to root
+        run: |
+          find artifacts -name '*.tar.gz' -exec mv {} . \;
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            wasixcc-*.tar.gz
+          draft: true
+          prerelease: false
+          generate_release_notes: true

@@ -1,0 +1,75 @@
+name: Build and Package
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the WebC package
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Install Rust via rustup
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90 --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install LLVM
+        run: |
+          curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" --retry 3 --proto '=https' --tlsv1.2 -sSf ${{ env.LLVM_URL }} -L -o llvm.tar.xz
+          LLVM_DIR=$HOME/${{ env.LLVM_DIR }}
+          mkdir ${LLVM_DIR}
+          tar xf llvm.tar.xz --strip-components=1 -C ${LLVM_DIR}
+          echo "${LLVM_DIR}/bin" >> $GITHUB_PATH
+          echo "${LLVM_DIR}/usr/bin" >> $GITHUB_PATH
+        env:
+          LLVM_DIR: .llvm
+          LLVM_URL: https://github.com/wasmerio/llvm-custom-builds/releases/download/21.x/llvm-linux-amd64.tar.xz
+
+      - name: Install cargo-wasix
+        run: |
+          rustup default stable
+          cargo install cargo-wasix
+          cargo wasix download-toolchain
+
+      - name: Build WASIX Binary
+        run: |
+          cargo +wasix build --release --locked --target=wasm32-wasmer-wasi
+          ls -lah target/wasm32-wasmer-wasi/release/sendmail.wasm
+      
+      - name: Install Wasmer
+        run: |
+          curl https://get.wasmer.io -sSfL | sh
+          echo "$HOME/.wasmer/bin" >> $GITHUB_PATH
+      
+      - name: Package as WebC
+        run: |
+          wasmer package build
+          mv *.webc sendmail.webc
+          ls -lah sendmail.webc
+      
+      - name: Upload WebC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sendmail.webc
+          path: |
+            sendmail.webc

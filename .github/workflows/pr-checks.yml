@@ -49,3 +49,7 @@ jobs:
       
       - name: Run linting
         run: cargo clippy -- -D clippy::all
+
+  build-webc:
+    name: Build the WebC package
+    uses: ./.github/workflows/build-webc.yml
