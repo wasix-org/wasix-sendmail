@@ -28,6 +28,12 @@ pub fn run_sendmail(
 
     logger::init_logger(cli_args.verbosity);
 
+    // Fail early if no recipients specified and not reading from headers
+    if !cli_args.read_recipients_from_headers && cli_args.recipients.is_empty() {
+        let _ = writeln!(stderr, "sendmail: No recipients specified");
+        return 1;
+    }
+
     let backend = backend::create_from_env(envs);
 
     let mut raw_email = String::new();
