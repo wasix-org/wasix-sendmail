@@ -136,10 +136,12 @@ jobs:
 
   build-webc:
     name: Build the WebC package
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/build-webc.yml
   
   publish-webc:
-    name: Release
+    name: Publish the WebC package
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs: [verify-version, build-webc]
     steps:      
@@ -158,31 +160,30 @@ jobs:
           wasmer package unpack sendmail.webc --out-dir sendmail
           wasmer package publish sendmail --registry wasmer.io --token "${{ secrets.WASMER_TOKEN }}"
 
-  publish-crates-io:
-    name: Publish to crates.io
-    needs: [verify-version, publish-webc]
-    runs-on: ubuntu-latest
-    # Do NOT run on Pull Requests
-    if: github.event_name != 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
+  # TODO: Uncomment this when we no longer rely on git dependencies
+  # publish-crates-io:
+  #   name: Publish to crates.io
+  #   if: github.event_name != 'pull_request'
+  #   runs-on: ubuntu-latest
+  #   needs: [verify-version, publish-webc]
+  #   steps:
+  #     - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+  #     - name: Install Rust
+  #       uses: dtolnay/rust-toolchain@stable
 
-      - name: Publish to crates.io
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
-        run: |
-          echo "Publishing wasixcc version ${{ needs.verify-version.outputs.version }} to crates.io"
-          cargo publish
+  #     - name: Publish to crates.io
+  #       env:
+  #         CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+  #       run: |
+  #         echo "Publishing wasixcc version ${{ needs.verify-version.outputs.version }} to crates.io"
+  #         cargo publish
 
   publish-release:
     name: Create Release
-    needs: [build-webc, publish-crates-io]
-    runs-on: ubuntu-latest
-    # Do NOT run on Pull Requests
     if: github.event_name != 'pull_request'
+    needs: [build-webc, publish-webc] # TODO: Add publish-crates-io when we no longer rely on git dependencies
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -193,13 +194,14 @@ jobs:
 
       - name: Move artifacts to root
         run: |
-          find artifacts -name '*.tar.gz' -exec mv {} . \;
+          find artifacts -name '*.webc' -exec mv {} . \;
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.verify-version.outputs.version }}
           files: |
-            wasixcc-*.tar.gz
+            sendmail.webc
           draft: true
           prerelease: false
           generate_release_notes: true
