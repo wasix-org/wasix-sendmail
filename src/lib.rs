@@ -83,7 +83,8 @@ pub fn run_sendmail(
             .expect("Failed to parse default from address")
     });
 
-    let missing_headers = generate_missing_headers(&headers, &envelope_from, cli_args.fullname.as_deref());
+    let missing_headers =
+        generate_missing_headers(&headers, &envelope_from, cli_args.fullname.as_deref());
     let raw_email = prepend_headers(&raw_email, &missing_headers);
 
     let recipients_refs: Vec<&str> = recipients.iter().map(|e| e.as_str()).collect();
@@ -99,7 +100,11 @@ pub fn run_sendmail(
 
 /// Generate missing required headers (From:, Date:, Message-ID:) based on existing headers.
 /// Returns a vector of header strings to add.
-fn generate_missing_headers(headers: &[parser::HeaderField], from: &EmailAddress, fullname: Option<&str>) -> Vec<String> {
+fn generate_missing_headers(
+    headers: &[parser::HeaderField],
+    from: &EmailAddress,
+    fullname: Option<&str>,
+) -> Vec<String> {
     let mut headers_to_add = Vec::new();
 
     if !parser::has_header(headers, "From") {
@@ -157,8 +162,8 @@ fn format_rfc5322_date() -> String {
     let formatted_str = String::from_utf8_lossy(&formatted_bytes);
     // Parse the Date header from the formatted message
     for line in formatted_str.lines() {
-        if line.starts_with("Date: ") {
-            return line[6..].trim().to_string();
+        if let Some(content) = line.strip_prefix("Date: ") {
+            return content.trim().to_string();
         }
     }
     // Fail if Date header is not found - this should never happen
