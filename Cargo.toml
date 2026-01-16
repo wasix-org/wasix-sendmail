@@ -2,6 +2,15 @@
 name = "wasix-sendmail"
 version = "0.1.0"
 edition = "2021"
+license = "AGPL-3.0"
+authors = [
+    "Zebreus <zebreus@zebreu.us>",
+    "Arshia Ghafoori <arshia001@live.com>",
+]
+repository = "https://github.com/wasix-org/wasix-sendmail"
+keywords = ["wasix", "sendmail", "email", "smtp", "wasmer"]
+categories = ["email", "command-line-utilities"]
+description = "A POSIX-compliant sendmail implementation for WASIX"
 
 [lib]
 crate-type = ["rlib"]
