@@ -26,14 +26,12 @@ strip = true
 codegen-units = 1
 # panic = "abort" # 5% size reduction, but probably not worth it
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 chumsky = { version = "0.12.0", default-features = false }
 clap = { version = "4.5", features = ["derive"] }
 email_address = "0.2"
 env_logger = "0.11"
-lettre = { version = "0.11.7", git = "https://github.com/wasix-org/lettre.git", branch = "wasix-0.11.7", default-features = false, features = [
+lettre = { version = "0.11.7", default-features = false, features = [
     "builder",
     "rustls-tls",
     "smtp-transport",
@@ -45,17 +43,11 @@ uuid = { version = "1.0", features = [
     "v4",
     "getrandom",
 ], default-features = false }
-getrandom = "0.2.15"
 
 # Pin wasix-specific crate versions so patches work
 socket2 = "=0.5.5"
 libc = "=0.2.169"
-rustls = "=0.22.2"
-ring = "=0.17.7"
 
 [patch.crates-io]
 socket2 = { git = "https://github.com/wasix-org/socket2.git", branch = "v0.5.5" }
 libc = { git = "https://github.com/wasix-org/libc.git", branch = "wasix-0.2.169" }
-rustls = { git = "https://github.com/wasix-org/rustls.git", branch = "v0.22.2" }
-ring = { git = "https://github.com/wasix-org/ring.git", branch = "0.17.7" }
-getrandom = { git = "https://github.com/wasix-org/getrandom.git", branch = "wasix-0.2.15" }
