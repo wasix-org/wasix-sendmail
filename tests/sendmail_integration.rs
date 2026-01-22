@@ -104,8 +104,8 @@ fn common_t_no_recipients_is_error() {
 }
 
 #[test]
-fn uncommon_cli_from_overrides_header_from() {
-    let out = unique_temp_file("uncommon_cli_from_overrides_header_from");
+fn common_cli_from_overrides_header_from() {
+    let out = unique_temp_file("common_cli_from_overrides_header_from");
     let envs = envs_for_file_backend(&out);
 
     let args = vec![
@@ -122,6 +122,8 @@ fn uncommon_cli_from_overrides_header_from() {
     let content = std::fs::read_to_string(&path).expect("output file should exist");
     assert!(content.contains("Envelope-From: override@example.com"));
     assert!(!content.contains("Envelope-From: header@example.com"));
+    assert!(content.contains("From: header@example.com"));
+    assert!(!content.contains("\nFrom: override@example.com"));
 
     let _ = std::fs::remove_file(&path);
 }
@@ -275,8 +277,8 @@ fn common_f_flag_escapes_quotes_in_fullname() {
 }
 
 #[test]
-fn uncommon_f_flag_does_not_override_existing_from_header() {
-    let out = unique_temp_file("uncommon_f_flag_does_not_override_existing_from_header");
+fn common_f_flag_does_not_override_existing_from_header() {
+    let out = unique_temp_file("common_f_flag_does_not_override_existing_from_header");
     let envs = envs_for_file_backend(&out);
 
     let args = vec![
