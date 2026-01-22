@@ -52,9 +52,6 @@ pub struct BackendConfig {
 
     #[command(flatten)]
     pub api: ApiBackendConfig,
-
-    #[command(flatten)]
-    pub direct_smtp: DirectSmtpConfig,
 }
 
 /// File backend configuration (for debugging)
@@ -103,12 +100,4 @@ pub struct ApiBackendConfig {
     /// Token which can be used to identify with the backend server
     #[arg(long, env = "SENDMAIL_API_TOKEN")]
     pub api_token: Option<String>,
-}
-
-/// Direct SMTP configuration (always available as fallback)
-#[derive(Args, Debug)]
-pub struct DirectSmtpConfig {
-    /// Enable direct SMTP submission on port 25
-    #[arg(long, env = "SENDMAIL_DIRECT_SMTP")]
-    pub direct_smtp: bool,
 }
