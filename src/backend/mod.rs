@@ -122,7 +122,7 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
             port,
             username,
             password,
-        )));
+        )?));
     }
 
     // Priority 3: Backend/REST API
@@ -139,7 +139,7 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
         info!("Using REST API backend");
         let url = config.api.api_url.as_ref().unwrap().clone();
         let sender = config.api.api_sender.as_ref().unwrap();
-        let Ok(sender_email) = EmailAddress::from_str(&sender) else {
+        let Ok(sender_email) = EmailAddress::from_str(sender) else {
             return Err(BackendError::ApiInvalidEmailAddress(sender.clone()));
         };
         let token = config.api.api_token.as_ref().unwrap().clone();

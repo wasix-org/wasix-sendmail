@@ -119,7 +119,7 @@ pub fn run_sendmail(
     match backend.send(&envelope_from, &recipients_refs, &raw_email) {
         Ok(()) => 0,
         Err(e) => {
-            error!("Failed to send email: {}", e);
+            error!("Failed to send email: {:?}", e);
             let _ = writeln!(stderr, "sendmail: {}", e);
             1
         }
