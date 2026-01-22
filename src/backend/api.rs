@@ -7,13 +7,17 @@ use crate::parser::EmailAddress;
 
 pub struct ApiBackend {
     url: String,
-    sender: String,
+    default_sender: EmailAddress,
     token: String,
 }
 
 impl ApiBackend {
-    pub fn new(url: String, sender: String, token: String) -> Self {
-        Self { url, sender, token }
+    pub fn new(url: String, sender: EmailAddress, token: String) -> Self {
+        Self {
+            url,
+            default_sender: sender,
+            token,
+        }
     }
 }
 
@@ -30,7 +34,7 @@ impl EmailBackend for ApiBackend {
             envelope_to.len()
         );
         debug!("API backend: envelope-from={}", envelope_from.as_str());
-        debug!("API backend: default sender={}", self.sender);
+        debug!("API backend: default sender={}", self.default_sender);
         trace!("API backend: raw_email_bytes={}", raw_email.len());
 
         if self.url.is_empty() {
@@ -45,7 +49,7 @@ impl EmailBackend for ApiBackend {
         let sender = envelope_from.as_str();
 
         // Build query parameters
-        let mut url = Url::parse(&self.url).context("Invalid API URL")?;
+        let mut url = Url::parse(&self.url).context("Failed to parse API URL")?;
         url.query_pairs_mut().append_pair("sender", sender);
 
         for recipient in envelope_to {
@@ -125,21 +129,41 @@ impl EmailBackend for ApiBackend {
             }
         }
     }
+
+    fn default_sender(&self) -> EmailAddress {
+        self.default_sender.clone()
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
 
     #[test]
     fn test_api_backend_creation() {
         let backend = ApiBackend::new(
             "https://api.example.com/v1/mail".to_string(),
-            "default@example.com".to_string(),
+            EmailAddress::from_str("default@example.com").unwrap(),
             "test-token".to_string(),
         );
         assert_eq!(backend.url, "https://api.example.com/v1/mail");
-        assert_eq!(backend.sender, "default@example.com");
+        assert_eq!(
+            backend.default_sender,
+            EmailAddress::from_str("default@example.com").unwrap()
+        );
         assert_eq!(backend.token, "test-token");
+    }
+
+    #[test]
+    fn test_api_backend_default_sender() {
+        let backend = ApiBackend::new(
+            "https://api.example.com/v1/mail".to_string(),
+            EmailAddress::from_str("custom@example.com").unwrap(),
+            "test-token".to_string(),
+        );
+        let default_sender = backend.default_sender();
+        assert_eq!(default_sender.as_str(), "custom@example.com");
     }
 }

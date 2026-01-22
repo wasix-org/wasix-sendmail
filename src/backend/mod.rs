@@ -2,6 +2,8 @@ pub mod api;
 pub mod file;
 pub mod smtp;
 
+use std::str::FromStr;
+
 pub use api::ApiBackend;
 pub use file::FileBackend;
 pub use smtp::SmtpBackend;
@@ -22,6 +24,8 @@ pub enum BackendError {
     ApiUrlNotProvided,
     #[error("API configuration incomplete: all three variables (SENDMAIL_API_URL, SENDMAIL_API_SENDER, SENDMAIL_API_TOKEN) must be set")]
     ApiConfigIncomplete,
+    #[error("Invalid default sender address: {0}")]
+    ApiInvalidEmailAddress(String),
     #[error("No backend configured. Please set one of: SENDMAIL_FILE_PATH, SENDMAIL_RELAY_HOST, or SENDMAIL_API_URL")]
     NoBackendConfigured,
     #[error("API request failed (400 Bad Request): {0}")]
@@ -63,6 +67,18 @@ pub trait EmailBackend: Send + Sync {
         envelope_to: &[&EmailAddress],
         raw_email: &str,
     ) -> Result<(), BackendError>;
+
+    /// Get the default sender address for this backend.
+    ///
+    /// Returns the default sender email address. For most backends this is
+    /// `username@localhost`, but for API backends it returns the configured sender.
+    fn default_sender(&self) -> EmailAddress {
+        // TODO: Get the username from the system without using whoami, because that introduces a bunch of weird dependencies.
+        let username = "nobody";
+        let sender_str = format!("{}@localhost", username);
+        EmailAddress::from_str(&sender_str)
+            .expect("username@localhost should be a valid email address")
+    }
 }
 
 /// Create a backend instance based on configuration.
@@ -121,18 +137,17 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
         }
 
         info!("Using REST API backend");
-        let url = config.api.api_url.as_ref().unwrap();
+        let url = config.api.api_url.as_ref().unwrap().clone();
         let sender = config.api.api_sender.as_ref().unwrap();
-        let token = config.api.api_token.as_ref().unwrap();
+        let Ok(sender_email) = EmailAddress::from_str(&sender) else {
+            return Err(BackendError::ApiInvalidEmailAddress(sender.clone()));
+        };
+        let token = config.api.api_token.as_ref().unwrap().clone();
 
         debug!("API backend: url={}", url);
-        debug!("API backend: default sender={}", sender);
+        debug!("API backend: default sender={}", sender_email);
 
-        return Ok(Box::new(ApiBackend::new(
-            url.clone(),
-            sender.clone(),
-            token.clone(),
-        )));
+        return Ok(Box::new(ApiBackend::new(url, sender_email, token)));
     }
 
     // No backend configured - return error

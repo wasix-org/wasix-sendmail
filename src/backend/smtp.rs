@@ -174,3 +174,16 @@ fn parse_raw_email(email: &str) -> (Vec<String>, String) {
 
     (headers, body)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_smtp_backend_default_sender() {
+        let backend = SmtpBackend::new("smtp.example.com".to_string(), 587, None, None);
+        let default_sender = backend.default_sender();
+        // The default sender should be username@localhost
+        assert!(default_sender.as_str().ends_with("@localhost"));
+    }
+}

@@ -255,4 +255,15 @@ mod tests {
 
         let _ = fs::remove_file(&temp_file);
     }
+
+    #[test]
+    fn test_file_backend_default_sender() {
+        let temp_file = create_temp_file();
+        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let default_sender = backend.default_sender();
+        // The default sender should be username@localhost
+        assert!(default_sender.as_str().ends_with("@localhost"));
+
+        let _ = fs::remove_file(&temp_file);
+    }
 }
