@@ -81,7 +81,12 @@ impl EmailBackend for ApiBackend {
             if body.len() <= 100 {
                 body
             } else {
-                body[..100].to_string()
+                // Truncate safely at a valid UTF-8 boundary near 100 bytes
+                let mut idx = 100;
+                while !body.is_char_boundary(idx) {
+                    idx -= 1;
+                }
+                body[..idx].to_string()
             }
         };
 
