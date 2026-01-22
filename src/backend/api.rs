@@ -1,9 +1,9 @@
 use anyhow::Context;
 use log::{debug, info, trace};
-use reqwest::blocking::Client;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE};
+use url::Url;
 
 use super::{BackendError, EmailBackend};
+use crate::parser::EmailAddress;
 
 pub struct ApiBackend {
     url: String,
@@ -20,8 +20,8 @@ impl ApiBackend {
 impl EmailBackend for ApiBackend {
     fn send(
         &self,
-        envelope_from: &str,
-        envelope_to: &[&str],
+        envelope_from: &EmailAddress,
+        envelope_to: &[&EmailAddress],
         raw_email: &str,
     ) -> Result<(), BackendError> {
         info!(
@@ -29,7 +29,7 @@ impl EmailBackend for ApiBackend {
             self.url,
             envelope_to.len()
         );
-        debug!("API backend: envelope-from={}", envelope_from);
+        debug!("API backend: envelope-from={}", envelope_from.as_str());
         debug!("API backend: default sender={}", self.sender);
         trace!("API backend: raw_email_bytes={}", raw_email.len());
 
@@ -41,124 +41,82 @@ impl EmailBackend for ApiBackend {
             return Ok(());
         }
 
-        // Use envelope_from if provided, otherwise use default sender
-        let sender = if !envelope_from.is_empty() {
-            envelope_from
-        } else {
-            &self.sender
-        };
-
-        // Build the API request
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .context("Failed to create HTTP client")?;
+        // Use envelope_from, converting to string for API
+        let sender = envelope_from.as_str();
 
         // Build query parameters
-        let mut url = reqwest::Url::parse(&self.url).context("Invalid API URL")?;
+        let mut url = Url::parse(&self.url).context("Invalid API URL")?;
         url.query_pairs_mut().append_pair("sender", sender);
 
         for recipient in envelope_to {
-            url.query_pairs_mut().append_pair("recipients", recipient);
+            url.query_pairs_mut()
+                .append_pair("recipients", recipient.as_str());
         }
 
         debug!("API backend: POST {}", url);
         trace!("API backend: Authorization: Bearer [REDACTED]");
 
-        // Send the request
-        let response = client
-            .post(url)
-            .header(AUTHORIZATION, format!("Bearer {}", self.token))
-            .header(CONTENT_TYPE, "message/rfc822")
-            .body(raw_email.to_string())
-            .send()
-            .context("Failed to send HTTP request")?;
+        // Send the request with ureq
+        let response = ureq::post(url.as_str())
+            .timeout(std::time::Duration::from_secs(30))
+            .set("Authorization", &format!("Bearer {}", self.token))
+            .set("Content-Type", "message/rfc822")
+            .send_string(raw_email);
 
-        let status = response.status();
+        let (status, response_body) = match response {
+            Ok(resp) => (resp.status(), resp.into_string().ok()),
+            Err(ureq::Error::Status(code, resp)) => (code, resp.into_string().ok()),
+            Err(ureq::Error::Transport(e)) => {
+                return Err(BackendError::NetworkError(anyhow::anyhow!(
+                    "HTTP transport error: {}",
+                    e
+                )))
+            }
+        };
+
         debug!("API backend: response status={}", status);
 
-        match status.as_u16() {
+        let get_error_msg = |body: Option<String>, default: &str| {
+            let body = body.unwrap_or_else(|| default.to_string());
+            if body.len() <= 100 {
+                body
+            } else {
+                body[..100].to_string()
+            }
+        };
+
+        match status {
             202 => {
                 info!("API backend: message accepted for delivery");
                 Ok(())
             }
             400 => {
-                let body = response
-                    .text()
-                    .unwrap_or_else(|_| "Invalid request".to_string());
-                let error_msg = if body.len() <= 100 {
-                    body
-                } else {
-                    body[..100].to_string()
-                };
+                let error_msg = get_error_msg(response_body, "Invalid request");
                 Err(BackendError::ApiBadRequest(error_msg))
             }
             401 => {
-                let body = response
-                    .text()
-                    .unwrap_or_else(|_| "Unauthorized".to_string());
-                let error_msg = if body.len() <= 100 {
-                    body
-                } else {
-                    body[..100].to_string()
-                };
+                let error_msg = get_error_msg(response_body, "Unauthorized");
                 Err(BackendError::ApiUnauthorized(error_msg))
             }
             402 => {
-                let body = response
-                    .text()
-                    .unwrap_or_else(|_| "Quota exceeded".to_string());
-                let error_msg = if body.len() <= 100 {
-                    body
-                } else {
-                    body[..100].to_string()
-                };
+                let error_msg = get_error_msg(response_body, "Quota exceeded");
                 Err(BackendError::ApiQuotaExceeded(error_msg))
             }
             403 => {
-                let body = response.text().unwrap_or_else(|_| "Forbidden".to_string());
-                let error_msg = if body.len() <= 100 {
-                    body
-                } else {
-                    body[..100].to_string()
-                };
+                let error_msg = get_error_msg(response_body, "Forbidden");
                 Err(BackendError::ApiForbidden(error_msg))
             }
             413 => {
-                let body = response
-                    .text()
-                    .unwrap_or_else(|_| "Message too large".to_string());
-                let error_msg = if body.len() <= 100 {
-                    body
-                } else {
-                    body[..100].to_string()
-                };
+                let error_msg = get_error_msg(response_body, "Message too large");
                 Err(BackendError::ApiMessageTooLarge(error_msg))
             }
             500..=599 => {
-                let body = response
-                    .text()
-                    .unwrap_or_else(|_| "Server error".to_string());
-                let error_msg = if body.len() <= 100 {
-                    body
-                } else {
-                    body[..100].to_string()
-                };
-                Err(BackendError::ApiServerError(status.as_u16(), error_msg))
+                let error_msg = get_error_msg(response_body, "Server error");
+                Err(BackendError::ApiServerError(status, error_msg))
             }
             _ => {
-                let body = response
-                    .text()
-                    .unwrap_or_else(|_| "Unexpected error".to_string());
-                let error_msg = if body.len() <= 100 {
-                    body
-                } else {
-                    body[..100].to_string()
-                };
-                Err(BackendError::ApiUnexpectedStatus(
-                    status.as_u16(),
-                    error_msg,
-                ))
+                let error_msg = get_error_msg(response_body, "Unexpected error");
+                Err(BackendError::ApiUnexpectedStatus(status, error_msg))
             }
         }
     }

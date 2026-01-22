@@ -7,6 +7,7 @@ pub use file::FileBackend;
 pub use smtp::SmtpBackend;
 
 use crate::args::BackendConfig;
+use crate::parser::EmailAddress;
 use log::{debug, info, warn};
 
 #[derive(thiserror::Error, Debug)]
@@ -21,6 +22,8 @@ pub enum BackendError {
     ApiUrlNotProvided,
     #[error("API configuration incomplete: all three variables (SENDMAIL_API_URL, SENDMAIL_API_SENDER, SENDMAIL_API_TOKEN) must be set")]
     ApiConfigIncomplete,
+    #[error("No backend configured. Please set one of: SENDMAIL_FILE_PATH, SENDMAIL_RELAY_HOST, or SENDMAIL_API_URL")]
+    NoBackendConfigured,
     #[error("API request failed (400 Bad Request): {0}")]
     ApiBadRequest(String),
     #[error("API request failed (401 Unauthorized): {0}")]
@@ -56,8 +59,8 @@ pub trait EmailBackend: Send + Sync {
     /// * `raw_email` - Raw email content as read from stdin (headers + body)
     fn send(
         &self,
-        envelope_from: &str,
-        envelope_to: &[&str],
+        envelope_from: &EmailAddress,
+        envelope_to: &[&EmailAddress],
         raw_email: &str,
     ) -> Result<(), BackendError>;
 }
@@ -68,8 +71,8 @@ pub trait EmailBackend: Send + Sync {
 /// 1. File backend (if SENDMAIL_FILE_PATH is set)
 /// 2. SMTP relay (if SENDMAIL_RELAY_HOST is set)
 /// 3. Backend/REST API (if SENDMAIL_API_URL is set)
-/// 4. Direct SMTP (always available as fallback)
 ///
+/// If no backend is configured, returns an error.
 /// If sending with the selected backend fails, sendmail fails - no fallback to other backends.
 pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend>, BackendError> {
     // Priority 1: File backend
@@ -81,7 +84,7 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
 
     // Priority 2: SMTP relay
     if let Some(relay_host) = &config.smtp_relay.relay_host {
-        info!("Using SMTP relay backend (priority 2)");
+        info!("Using SMTP relay backend");
         let port = config.smtp_relay.relay_port.unwrap_or(587);
         let proto = config.smtp_relay.relay_proto.clone();
         let username = config.smtp_relay.relay_user.clone();
@@ -102,7 +105,6 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
             port,
             username,
             password,
-            false, // relay mode, not direct SMTP
         )));
     }
 
@@ -117,7 +119,7 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
             return Err(BackendError::ApiConfigIncomplete);
         }
 
-        info!("Using REST API backend (priority 3)");
+        info!("Using REST API backend");
         let url = config.api.api_url.as_ref().unwrap();
         let sender = config.api.api_sender.as_ref().unwrap();
         let token = config.api.api_token.as_ref().unwrap();
@@ -132,15 +134,6 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
         )));
     }
 
-    // Priority 4: Direct SMTP (always available as fallback)
-    info!("Using direct SMTP backend (priority 4, default)");
-    debug!("Direct SMTP: will attempt delivery on port 25");
-
-    Ok(Box::new(SmtpBackend::new(
-        "localhost".to_string(),
-        25,
-        None,
-        None,
-        true, // direct SMTP mode
-    )))
+    // No backend configured - return error
+    Err(BackendError::NoBackendConfigured)
 }

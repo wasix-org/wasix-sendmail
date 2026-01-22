@@ -115,8 +115,8 @@ pub fn run_sendmail(
         generate_missing_headers(&headers, &envelope_from, cli_args.fullname.as_deref());
     let raw_email = prepend_headers(&raw_email, &missing_headers);
 
-    let recipients_refs: Vec<&str> = recipients.iter().map(|e| e.as_str()).collect();
-    match backend.send(envelope_from.as_str(), &recipients_refs, &raw_email) {
+    let recipients_refs: Vec<&EmailAddress> = recipients.iter().collect();
+    match backend.send(&envelope_from, &recipients_refs, &raw_email) {
         Ok(()) => 0,
         Err(e) => {
             error!("Failed to send email: {}", e);
@@ -205,9 +205,9 @@ mod tests {
         let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
         let raw_email =
             "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nTest body";
-        assert!(backend
-            .send("sender@example.com", &["recipient@example.com"], raw_email)
-            .is_ok());
+        let from = EmailAddress::from_str("sender@example.com").unwrap();
+        let to = EmailAddress::from_str("recipient@example.com").unwrap();
+        assert!(backend.send(&from, &[&to], raw_email).is_ok());
         let _ = std::fs::remove_file(&temp_file);
     }
 

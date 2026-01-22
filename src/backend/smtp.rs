@@ -1,6 +1,6 @@
 use anyhow::Context;
 use lettre::{
-    message::{Mailboxes, MessageBuilder},
+    message::MessageBuilder,
     transport::smtp::{
         authentication::{Credentials, Mechanism},
         client::{CertificateStore, TlsParameters},
@@ -10,13 +10,13 @@ use lettre::{
 use log::{debug, info, trace};
 
 use super::{BackendError, EmailBackend};
+use crate::parser::EmailAddress;
 
 pub struct SmtpBackend {
     host: String,
     port: u16,
     username: Option<String>,
     password: Option<String>,
-    direct_smtp: bool,
 }
 
 impl SmtpBackend {
@@ -25,14 +25,12 @@ impl SmtpBackend {
         port: u16,
         username: Option<String>,
         password: Option<String>,
-        direct_smtp: bool,
     ) -> Self {
         Self {
             host,
             port,
             username,
             password,
-            direct_smtp,
         }
     }
 }
@@ -40,34 +38,32 @@ impl SmtpBackend {
 impl EmailBackend for SmtpBackend {
     fn send(
         &self,
-        envelope_from: &str,
-        envelope_to: &[&str],
+        envelope_from: &EmailAddress,
+        envelope_to: &[&EmailAddress],
         raw_email: &str,
     ) -> Result<(), BackendError> {
-        let mode = if self.direct_smtp { "direct" } else { "relay" };
         info!(
-            "SMTP backend ({}): sending via {}:{} ({} recipient(s))",
-            mode,
+            "SMTP relay backend: sending via {}:{} ({} recipient(s))",
             self.host,
             self.port,
             envelope_to.len()
         );
-        debug!("SMTP backend: envelope-from={}", envelope_from);
-        trace!("SMTP backend: raw_email_bytes={}", raw_email.len());
+        debug!(
+            "SMTP relay backend: envelope-from={}",
+            envelope_from.as_str()
+        );
+        trace!("SMTP relay backend: raw_email_bytes={}", raw_email.len());
 
         if std::env::var("SSL_CERT_DIR").is_err() {
             std::env::set_var("SSL_CERT_DIR", "/openssl/ssl/certs");
-            debug!("SMTP backend: set SSL_CERT_DIR=/openssl/ssl/certs");
+            debug!("SMTP relay backend: set SSL_CERT_DIR=/openssl/ssl/certs");
         }
 
         if self.host.is_empty() {
             return Err(BackendError::HostNotProvided);
         }
-        if envelope_from.is_empty() {
-            return Err(BackendError::FromNotProvided);
-        }
         if envelope_to.is_empty() {
-            debug!("SMTP backend: empty recipient list; nothing to send");
+            debug!("SMTP relay backend: empty recipient list; nothing to send");
             return Ok(()); // Empty recipient list, nothing to send
         }
 
@@ -76,34 +72,34 @@ impl EmailBackend for SmtpBackend {
             return Err(BackendError::OnlyUsernameOrPasswordProvided);
         }
         if self.username.is_some() {
-            debug!("SMTP backend: authentication enabled (Login)");
+            debug!("SMTP relay backend: authentication enabled (Login)");
         } else {
-            debug!("SMTP backend: authentication disabled");
+            debug!("SMTP relay backend: authentication disabled");
         }
 
         // Parse raw email to extract headers and body
         let (headers, body) = parse_raw_email(raw_email);
         trace!(
-            "SMTP backend: parsed headers={} body_bytes={}",
+            "SMTP relay backend: parsed headers={} body_bytes={}",
             headers.len(),
             body.len()
         );
 
-        // Build message from raw email
-        let mut builder = envelope_from
-            .parse::<Mailboxes>()
-            .context("Failed to parse envelope from address")?
-            .into_iter()
-            .fold(MessageBuilder::new(), |b, addr| b.from(addr));
+        // Build message from raw email using EmailAddress
+        let mut builder = MessageBuilder::new().from(
+            envelope_from
+                .as_str()
+                .parse()
+                .context("Failed to parse envelope from address")?,
+        );
 
         // Set envelope to recipients
         for to_addr in envelope_to {
-            for addr in to_addr
-                .parse::<Mailboxes>()
-                .context("Failed to parse envelope to address")?
-            {
-                builder = builder.to(addr);
-            }
+            let mailbox = to_addr
+                .as_str()
+                .parse()
+                .context("Failed to parse envelope to address")?;
+            builder = builder.to(mailbox);
         }
 
         // Parse Subject header if present (most common header)
@@ -122,9 +118,9 @@ impl EmailBackend for SmtpBackend {
 
         if let Some(subject_value) = subject {
             builder = builder.subject(subject_value);
-            debug!("SMTP backend: subject={}", subject_value);
+            debug!("SMTP relay backend: subject={}", subject_value);
         } else {
-            trace!("SMTP backend: no Subject header found");
+            trace!("SMTP relay backend: no Subject header found");
         }
 
         // Set body (which includes any unparsed headers)
@@ -150,12 +146,12 @@ impl EmailBackend for SmtpBackend {
         }
 
         // Send
-        debug!("SMTP backend: connecting and sending");
+        debug!("SMTP relay backend: connecting and sending");
         transport
             .build()
             .send(&email)
             .context("Failed to send mail")?;
-        info!("SMTP backend: send complete");
+        info!("SMTP relay backend: send complete");
         Ok(())
     }
 }
