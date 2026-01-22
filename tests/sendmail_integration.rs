@@ -88,21 +88,19 @@ fn common_t_reads_to_cc_bcc_and_from_header() {
 }
 
 #[test]
-fn uncommon_t_no_recipients_is_ok() {
-    let out = unique_temp_file("uncommon_t_no_recipients_is_ok");
+fn common_t_no_recipients_is_error() {
+    let out = unique_temp_file("common_t_no_recipients_is_error");
     let envs = envs_for_file_backend(&out);
 
     let args = vec!["sendmail".to_string(), "-t".to_string()];
     let email = "From: sender@example.com\nSubject: No recipients\n\nBody";
 
     let (rc, path) = run_with_file_backend(args, envs, email);
-    assert_eq!(rc, 0);
-
-    let content = std::fs::read_to_string(&path).expect("output file should exist");
-    assert!(content.contains("Envelope-From: sender@example.com"));
-    assert!(content.contains("Envelope-To: "));
-
-    let _ = std::fs::remove_file(&path);
+    assert_eq!(rc, 1);
+    assert!(
+        !path.exists(),
+        "backend should not have been invoked without recipients"
+    );
 }
 
 #[test]
