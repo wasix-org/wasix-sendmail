@@ -31,7 +31,7 @@ chumsky = { version = "0.12.0", default-features = false }
 clap = { version = "4.5", features = ["derive"] }
 email_address = "0.2"
 env_logger = "0.11"
-lettre = { version = "0.11.7", default-features = false, features = [
+lettre = { version = "0.11.17", default-features = false, features = [
     "builder",
     "rustls-tls",
     "smtp-transport",
