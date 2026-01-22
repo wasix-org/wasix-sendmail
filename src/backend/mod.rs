@@ -98,6 +98,7 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
         // Validate authentication credentials
         if username.is_some() != password.is_some() {
             warn!("SMTP relay credentials misconfigured: only one of SENDMAIL_RELAY_USER/SENDMAIL_RELAY_PASS is set");
+            return Err(BackendError::OnlyUsernameOrPasswordProvided);
         }
 
         return Ok(Box::new(SmtpBackend::new(
