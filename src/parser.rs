@@ -73,23 +73,17 @@ pub fn parse_email_headers(email: &str) -> Vec<HeaderField> {
 /// This function parses header values like "To", "Cc", "Bcc" that contain mailbox lists.
 /// Returns a vector of validated email addresses.
 pub fn parse_mailboxes_header(value: &str) -> Result<Vec<EmailAddress>, ParseError> {
-    let mut addresses = Vec::new();
-
-    // Parse address list using lettre's Mailboxes parser
     let mailboxes: Mailboxes = value
         .parse()
         .map_err(|_| ParseError::InvalidEmail(value.to_string()))?;
 
-    // Extract email addresses from mailboxes
-    for mailbox in mailboxes.iter() {
-        let addr_str = mailbox.email.to_string();
-        addresses.push(
-            EmailAddress::from_str(&addr_str)
-                .map_err(|_| ParseError::InvalidEmail(addr_str.clone()))?,
-        );
-    }
-
-    Ok(addresses)
+    mailboxes
+        .iter()
+        .map(|mailbox| {
+            let addr_str = mailbox.email.to_string();
+            EmailAddress::from_str(&addr_str).map_err(|_| ParseError::InvalidEmail(addr_str))
+        })
+        .collect()
 }
 
 /// Parse a header value as mailboxes and return the first email address.
@@ -101,22 +95,19 @@ pub fn parse_mailbox_header(value: &str) -> Result<Option<EmailAddress>, ParseEr
         .parse()
         .map_err(|_| ParseError::InvalidEmail(value.to_string()))?;
 
-    // Collect mailboxes into a vector to check length
     let mailbox_vec: Vec<_> = mailboxes.iter().collect();
-    if mailbox_vec.is_empty() {
-        return Ok(None);
-    }
 
     if mailbox_vec.len() > 1 {
         debug!("Multiple addresses found in mailbox header; using the first");
     }
 
-    // Extract email address from first mailbox
-    let addr_str = mailbox_vec[0].email.to_string();
-    Ok(Some(
-        EmailAddress::from_str(&addr_str)
-            .map_err(|_| ParseError::InvalidEmail(addr_str.clone()))?,
-    ))
+    mailbox_vec
+        .first()
+        .map(|mailbox| {
+            let addr_str = mailbox.email.to_string();
+            EmailAddress::from_str(&addr_str).map_err(|_| ParseError::InvalidEmail(addr_str))
+        })
+        .transpose()
 }
 
 /// Return all header values for a header name (case-insensitive).

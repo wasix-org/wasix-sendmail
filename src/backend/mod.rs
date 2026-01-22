@@ -41,17 +41,19 @@ pub trait EmailBackend: Send + Sync {
     ) -> Result<(), BackendError>;
 }
 
+/// Helper to lookup an environment variable by key
+fn get_env(envs: &[(String, String)], key: &str) -> Option<String> {
+    envs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+}
+
 /// Create a backend instance based on environment variables.
 ///
 /// Reads `SENDMAIL_BACKEND` to determine the backend type:
 /// - `"smtp"` - Creates an SMTP backend (requires `SMTP_HOST`, `SMTP_PORT`, optionally `SMTP_USERNAME`/`SMTP_PASSWORD`)
 /// - `"file"` or any other value - Creates a file backend (uses `SENDMAIL_FILE_PATH` or defaults to `/tmp/sendmail_output.txt`)
 pub fn create_from_env(envs: &[(String, String)]) -> Box<dyn EmailBackend> {
-    let backend_type = envs
-        .iter()
-        .find(|(key, _)| key == "SENDMAIL_BACKEND")
-        .map(|(_, value)| value.as_str())
-        .unwrap_or("file");
+    let backend_env = get_env(envs, "SENDMAIL_BACKEND");
+    let backend_type = backend_env.as_deref().unwrap_or("file");
 
     debug!(
         "Selecting backend via env SENDMAIL_BACKEND={}",
@@ -61,24 +63,12 @@ pub fn create_from_env(envs: &[(String, String)]) -> Box<dyn EmailBackend> {
     match backend_type {
         "smtp" => {
             info!("Using SMTP backend");
-            let host = envs
-                .iter()
-                .find(|(key, _)| key == "SMTP_HOST")
-                .map(|(_, value)| value.clone())
-                .unwrap_or_else(|| "localhost".to_string());
-            let port = envs
-                .iter()
-                .find(|(key, _)| key == "SMTP_PORT")
-                .and_then(|(_, value)| value.parse().ok())
+            let host = get_env(envs, "SMTP_HOST").unwrap_or_else(|| "localhost".to_string());
+            let port = get_env(envs, "SMTP_PORT")
+                .and_then(|v| v.parse().ok())
                 .unwrap_or(587);
-            let username = envs
-                .iter()
-                .find(|(key, _)| key == "SMTP_USERNAME")
-                .map(|(_, value)| value.clone());
-            let password = envs
-                .iter()
-                .find(|(key, _)| key == "SMTP_PASSWORD")
-                .map(|(_, value)| value.clone());
+            let username = get_env(envs, "SMTP_USERNAME");
+            let password = get_env(envs, "SMTP_PASSWORD");
 
             debug!("Creating SMTP backend: host={} port={}", host, port);
             if username.is_some() ^ password.is_some() {
@@ -94,10 +84,7 @@ pub fn create_from_env(envs: &[(String, String)]) -> Box<dyn EmailBackend> {
                 );
             }
             info!("Using file backend");
-            let path = envs
-                .iter()
-                .find(|(key, _)| key == "SENDMAIL_FILE_PATH")
-                .map(|(_, value)| value.clone())
+            let path = get_env(envs, "SENDMAIL_FILE_PATH")
                 .unwrap_or_else(|| "/tmp/sendmail_output.txt".to_string());
             debug!("Creating file backend: path={}", path);
             Box::new(FileBackend::new(path))
