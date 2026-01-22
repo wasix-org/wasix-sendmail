@@ -1,6 +1,7 @@
 use std::{
     io::{Read, Write},
     str::FromStr,
+    sync::Mutex,
 };
 pub mod args;
 pub mod backend;
@@ -12,6 +13,8 @@ use log::{error, info};
 use parser::EmailAddress;
 use uuid::Uuid;
 
+static PARSER_MUTEX: Mutex<()> = Mutex::new(());
+
 pub fn run_sendmail(
     stdin: &mut dyn Read,
     _stdout: &mut dyn Write,
@@ -20,12 +23,29 @@ pub fn run_sendmail(
     envs: &[(String, String)],
 ) -> i32 {
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let cli_args = match args::SendmailArgs::try_parse_from(args_str) {
-        Ok(args) => args,
-        Err(e) => {
-            let _ = e.print();
-            return 1;
+    let cli_args = {
+        // Mutex to allow running tests in parallel with different environment variables
+        let _guard = PARSER_MUTEX.lock().unwrap();
+        let mut restored_envs = Vec::new();
+        for (key, value) in envs {
+            let previous_value = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            restored_envs.push((key.to_string(), previous_value));
         }
+        let parsed_args = match args::SendmailArgs::try_parse_from(args_str) {
+            Ok(args) => args,
+            Err(e) => {
+                let _ = e.print();
+                return 1;
+            }
+        };
+        for (key, value) in restored_envs {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        parsed_args
     };
 
     logger::init_logger(cli_args.verbosity);
@@ -36,7 +56,14 @@ pub fn run_sendmail(
         return 1;
     }
 
-    let backend = backend::create_from_env(envs);
+    let backend = match backend::create_from_config(&cli_args.backend_config) {
+        Ok(b) => b,
+        Err(e) => {
+            error!("Failed to create backend: {}", e);
+            let _ = writeln!(stderr, "sendmail: {}", e);
+            return 1;
+        }
+    };
 
     let mut raw_email = String::new();
     if let Err(e) = stdin.read_to_string(&mut raw_email) {

@@ -1,9 +1,12 @@
+pub mod api;
 pub mod file;
 pub mod smtp;
 
+pub use api::ApiBackend;
 pub use file::FileBackend;
 pub use smtp::SmtpBackend;
 
+use crate::args::BackendConfig;
 use log::{debug, info, warn};
 
 #[derive(thiserror::Error, Debug)]
@@ -14,6 +17,24 @@ pub enum BackendError {
     FromNotProvided,
     #[error("Username and password must be provided together")]
     OnlyUsernameOrPasswordProvided,
+    #[error("API URL not provided")]
+    ApiUrlNotProvided,
+    #[error("API configuration incomplete: all three variables (SENDMAIL_API_URL, SENDMAIL_API_SENDER, SENDMAIL_API_TOKEN) must be set")]
+    ApiConfigIncomplete,
+    #[error("API request failed (400 Bad Request): {0}")]
+    ApiBadRequest(String),
+    #[error("API request failed (401 Unauthorized): {0}")]
+    ApiUnauthorized(String),
+    #[error("API request failed (402 Payment Required): {0}")]
+    ApiQuotaExceeded(String),
+    #[error("API request failed (403 Forbidden): {0}")]
+    ApiForbidden(String),
+    #[error("API request failed (413 Payload Too Large): {0}")]
+    ApiMessageTooLarge(String),
+    #[error("API request failed ({0} Server Error): {1}")]
+    ApiServerError(u16, String),
+    #[error("API request failed ({0}): {1}")]
+    ApiUnexpectedStatus(u16, String),
     #[error("{0}")]
     NetworkError(#[from] anyhow::Error),
     #[error("IO error: {0}")]
@@ -41,53 +62,85 @@ pub trait EmailBackend: Send + Sync {
     ) -> Result<(), BackendError>;
 }
 
-/// Helper to lookup an environment variable by key
-fn get_env(envs: &[(String, String)], key: &str) -> Option<String> {
-    envs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
-}
-
-/// Create a backend instance based on environment variables.
+/// Create a backend instance based on configuration.
 ///
-/// Reads `SENDMAIL_BACKEND` to determine the backend type:
-/// - `"smtp"` - Creates an SMTP backend (requires `SMTP_HOST`, `SMTP_PORT`, optionally `SMTP_USERNAME`/`SMTP_PASSWORD`)
-/// - `"file"` or any other value - Creates a file backend (uses `SENDMAIL_FILE_PATH` or defaults to `/tmp/sendmail_output.txt`)
-pub fn create_from_env(envs: &[(String, String)]) -> Box<dyn EmailBackend> {
-    let backend_env = get_env(envs, "SENDMAIL_BACKEND");
-    let backend_type = backend_env.as_deref().unwrap_or("file");
-
-    debug!(
-        "Selecting backend via env SENDMAIL_BACKEND={}",
-        backend_type
-    );
-
-    match backend_type {
-        "smtp" => {
-            info!("Using SMTP backend");
-            let host = get_env(envs, "SMTP_HOST").unwrap_or_else(|| "localhost".to_string());
-            let port = get_env(envs, "SMTP_PORT")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(587);
-            let username = get_env(envs, "SMTP_USERNAME");
-            let password = get_env(envs, "SMTP_PASSWORD");
-
-            debug!("Creating SMTP backend: host={} port={}", host, port);
-            if username.is_some() ^ password.is_some() {
-                warn!("SMTP credentials misconfigured: only one of SMTP_USERNAME/SMTP_PASSWORD is set");
-            }
-            Box::new(SmtpBackend::new(host, port, username, password))
-        }
-        other => {
-            if other != "file" {
-                warn!(
-                    "Unknown SENDMAIL_BACKEND={}; falling back to file backend",
-                    other
-                );
-            }
-            info!("Using file backend");
-            let path = get_env(envs, "SENDMAIL_FILE_PATH")
-                .unwrap_or_else(|| "/tmp/sendmail_output.txt".to_string());
-            debug!("Creating file backend: path={}", path);
-            Box::new(FileBackend::new(path))
-        }
+/// Backend selection priority order:
+/// 1. File backend (if SENDMAIL_FILE_PATH is set)
+/// 2. SMTP relay (if SENDMAIL_RELAY_HOST is set)
+/// 3. Backend/REST API (if SENDMAIL_API_URL is set)
+/// 4. Direct SMTP (always available as fallback)
+///
+/// If sending with the selected backend fails, sendmail fails - no fallback to other backends.
+pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend>, BackendError> {
+    // Priority 1: File backend
+    if let Some(file_path) = &config.file.file_path {
+        info!("Using file backend");
+        debug!("File backend: path={}", file_path);
+        return Ok(Box::new(FileBackend::new(file_path.clone())));
     }
+
+    // Priority 2: SMTP relay
+    if let Some(relay_host) = &config.smtp_relay.relay_host {
+        info!("Using SMTP relay backend (priority 2)");
+        let port = config.smtp_relay.relay_port.unwrap_or(587);
+        let proto = config.smtp_relay.relay_proto.clone();
+        let username = config.smtp_relay.relay_user.clone();
+        let password = config.smtp_relay.relay_pass.clone();
+
+        debug!("SMTP relay: host={} port={}", relay_host, port);
+        if let Some(p) = &proto {
+            debug!("SMTP relay: protocol={}", p);
+        }
+
+        // Validate authentication credentials
+        if username.is_some() != password.is_some() {
+            warn!("SMTP relay credentials misconfigured: only one of SENDMAIL_RELAY_USER/SENDMAIL_RELAY_PASS is set");
+        }
+
+        return Ok(Box::new(SmtpBackend::new(
+            relay_host.clone(),
+            port,
+            username,
+            password,
+            false, // relay mode, not direct SMTP
+        )));
+    }
+
+    // Priority 3: Backend/REST API
+    let api_url_set = config.api.api_url.is_some();
+    let api_sender_set = config.api.api_sender.is_some();
+    let api_token_set = config.api.api_token.is_some();
+
+    if api_url_set || api_sender_set || api_token_set {
+        // Check if all three are set
+        if !api_url_set || !api_sender_set || !api_token_set {
+            return Err(BackendError::ApiConfigIncomplete);
+        }
+
+        info!("Using REST API backend (priority 3)");
+        let url = config.api.api_url.as_ref().unwrap();
+        let sender = config.api.api_sender.as_ref().unwrap();
+        let token = config.api.api_token.as_ref().unwrap();
+
+        debug!("API backend: url={}", url);
+        debug!("API backend: default sender={}", sender);
+
+        return Ok(Box::new(ApiBackend::new(
+            url.clone(),
+            sender.clone(),
+            token.clone(),
+        )));
+    }
+
+    // Priority 4: Direct SMTP (always available as fallback)
+    info!("Using direct SMTP backend (priority 4, default)");
+    debug!("Direct SMTP: will attempt delivery on port 25");
+
+    Ok(Box::new(SmtpBackend::new(
+        "localhost".to_string(),
+        25,
+        None,
+        None,
+        true, // direct SMTP mode
+    )))
 }

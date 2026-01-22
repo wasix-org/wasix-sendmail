@@ -1,5 +1,5 @@
 use crate::parser::EmailAddress;
-use clap::Parser;
+use clap::{Args, Parser};
 use std::str::FromStr;
 
 /// Parse an email address from a string for clap
@@ -37,4 +37,78 @@ pub struct SendmailArgs {
     /// Recipient email addresses (ignored when reading recipients from headers)
     #[arg(value_name = "RECIPIENT", value_parser = parse_email)]
     pub recipients: Vec<EmailAddress>,
+
+    #[command(flatten)]
+    pub backend_config: BackendConfig,
+}
+
+#[derive(Args, Debug)]
+pub struct BackendConfig {
+    #[command(flatten)]
+    pub file: FileBackendConfig,
+
+    #[command(flatten)]
+    pub smtp_relay: SmtpRelayConfig,
+
+    #[command(flatten)]
+    pub api: ApiBackendConfig,
+
+    #[command(flatten)]
+    pub direct_smtp: DirectSmtpConfig,
+}
+
+/// File backend configuration (for debugging)
+#[derive(Args, Debug)]
+pub struct FileBackendConfig {
+    /// Path to the output file for file backend
+    #[arg(long, env = "SENDMAIL_FILE_PATH")]
+    pub file_path: Option<String>,
+}
+
+/// SMTP relay backend configuration
+#[derive(Args, Debug)]
+pub struct SmtpRelayConfig {
+    /// SMTP relay host
+    #[arg(long, env = "SENDMAIL_RELAY_HOST")]
+    pub relay_host: Option<String>,
+
+    /// SMTP relay port
+    #[arg(long, env = "SENDMAIL_RELAY_PORT")]
+    pub relay_port: Option<u16>,
+
+    /// SMTP relay protocol (e.g., tls, starttls, plain)
+    #[arg(long, env = "SENDMAIL_RELAY_PROTO")]
+    pub relay_proto: Option<String>,
+
+    /// SMTP relay username
+    #[arg(long, env = "SENDMAIL_RELAY_USER")]
+    pub relay_user: Option<String>,
+
+    /// SMTP relay password
+    #[arg(long, env = "SENDMAIL_RELAY_PASS")]
+    pub relay_pass: Option<String>,
+}
+
+/// Backend REST API configuration
+#[derive(Args, Debug)]
+pub struct ApiBackendConfig {
+    /// URL of the mail endpoint
+    #[arg(long, env = "SENDMAIL_API_URL")]
+    pub api_url: Option<String>,
+
+    /// Default sender of the mail
+    #[arg(long, env = "SENDMAIL_API_SENDER")]
+    pub api_sender: Option<String>,
+
+    /// Token which can be used to identify with the backend server
+    #[arg(long, env = "SENDMAIL_API_TOKEN")]
+    pub api_token: Option<String>,
+}
+
+/// Direct SMTP configuration (always available as fallback)
+#[derive(Args, Debug)]
+pub struct DirectSmtpConfig {
+    /// Enable direct SMTP submission on port 25
+    #[arg(long, env = "SENDMAIL_DIRECT_SMTP")]
+    pub direct_smtp: bool,
 }

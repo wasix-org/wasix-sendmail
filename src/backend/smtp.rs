@@ -16,6 +16,7 @@ pub struct SmtpBackend {
     port: u16,
     username: Option<String>,
     password: Option<String>,
+    direct_smtp: bool,
 }
 
 impl SmtpBackend {
@@ -24,12 +25,14 @@ impl SmtpBackend {
         port: u16,
         username: Option<String>,
         password: Option<String>,
+        direct_smtp: bool,
     ) -> Self {
         Self {
             host,
             port,
             username,
             password,
+            direct_smtp,
         }
     }
 }
@@ -41,8 +44,10 @@ impl EmailBackend for SmtpBackend {
         envelope_to: &[&str],
         raw_email: &str,
     ) -> Result<(), BackendError> {
+        let mode = if self.direct_smtp { "direct" } else { "relay" };
         info!(
-            "SMTP backend: sending via {}:{} ({} recipient(s))",
+            "SMTP backend ({}): sending via {}:{} ({} recipient(s))",
+            mode,
             self.host,
             self.port,
             envelope_to.len()
