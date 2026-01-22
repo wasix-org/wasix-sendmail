@@ -21,11 +21,7 @@ impl EmailBackend for FileBackend {
         envelope_to: &[&str],
         raw_email: &str,
     ) -> Result<(), BackendError> {
-        info!(
-            "File backend: writing message to {} ({} recipient(s))",
-            self.path,
-            envelope_to.len()
-        );
+        info!("File backend: writing message to {} ({} recipient(s))", self.path, envelope_to.len());
         debug!("File backend: envelope-from={}", envelope_from);
         trace!("File backend: raw_email_bytes={}", raw_email.len());
 
@@ -35,13 +31,8 @@ impl EmailBackend for FileBackend {
             .open(&self.path)
             .context("Failed to open file for writing")?;
 
-        // Write envelope information
-        writeln!(file, "Envelope-From: {}", envelope_from)?;
-        writeln!(file, "Envelope-To: {}", envelope_to.join(", "))?;
-        writeln!(file, "---")?;
-        // Write raw email content
-        writeln!(file, "{}", raw_email)?;
-        writeln!(file, "---")?;
+        writeln!(file, "Envelope-From: {}\nEnvelope-To: {}\n---\n{}\n---", 
+                 envelope_from, envelope_to.join(", "), raw_email)?;
 
         debug!("File backend: write complete");
         Ok(())

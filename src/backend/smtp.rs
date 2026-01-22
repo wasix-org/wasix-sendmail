@@ -85,15 +85,11 @@ impl EmailBackend for SmtpBackend {
         );
 
         // Build message from raw email
-        let mut builder = MessageBuilder::new();
-
-        // Set envelope from
-        for addr in envelope_from
+        let mut builder = envelope_from
             .parse::<Mailboxes>()
             .context("Failed to parse envelope from address")?
-        {
-            builder = builder.from(addr);
-        }
+            .into_iter()
+            .fold(MessageBuilder::new(), |b, addr| b.from(addr));
 
         // Set envelope to recipients
         for to_addr in envelope_to {
@@ -107,26 +103,22 @@ impl EmailBackend for SmtpBackend {
 
         // Parse Subject header if present (most common header)
         // Other headers will remain in the body
-        let mut subject: Option<&str> = None;
-        for header_line in &headers {
-            let trimmed = header_line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            // Extract Subject header value
-            if let Some(colon_pos) = trimmed.find(':') {
-                let header_name = trimmed[..colon_pos].trim();
-                if header_name.eq_ignore_ascii_case("Subject") {
-                    let subject_value = trimmed[colon_pos + 1..].trim();
-                    builder = builder.subject(subject_value);
-                    subject = Some(subject_value);
-                    break; // Found subject, no need to continue
-                }
-            }
-        }
-        if let Some(subject) = subject {
-            debug!("SMTP backend: subject={}", subject);
+        let subject = headers.iter()
+            .find_map(|line| {
+                let trimmed = line.trim();
+                trimmed.find(':').and_then(|colon_pos| {
+                    let header_name = trimmed[..colon_pos].trim();
+                    if header_name.eq_ignore_ascii_case("Subject") {
+                        Some(trimmed[colon_pos + 1..].trim())
+                    } else {
+                        None
+                    }
+                })
+            });
+        
+        if let Some(subject_value) = subject {
+            builder = builder.subject(subject_value);
+            debug!("SMTP backend: subject={}", subject_value);
         } else {
             trace!("SMTP backend: no Subject header found");
         }
@@ -166,24 +158,17 @@ impl EmailBackend for SmtpBackend {
 
 /// Parse raw email content into headers and body
 fn parse_raw_email(email: &str) -> (Vec<String>, String) {
-    let mut headers = Vec::new();
-    let mut body_start = 0;
     let lines: Vec<&str> = email.lines().collect();
+    let body_start = lines
+        .iter()
+        .position(|line| line.trim().is_empty())
+        .map_or(lines.len(), |pos| pos + 1);
 
-    for (i, line) in lines.iter().enumerate() {
-        if line.trim().is_empty() {
-            // Empty line separates headers from body
-            body_start = i + 1;
-            break;
-        }
-        headers.push(line.to_string());
-    }
-
-    let body = if body_start < lines.len() {
-        lines[body_start..].join("\n")
-    } else {
-        String::new()
-    };
+    let headers = lines[..body_start.saturating_sub(1)]
+        .iter()
+        .map(|&s| s.to_string())
+        .collect();
+    let body = lines.get(body_start..).map_or(String::new(), |b| b.join("\n"));
 
     (headers, body)
 }

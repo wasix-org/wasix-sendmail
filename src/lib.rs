@@ -68,7 +68,8 @@ pub fn run_sendmail(
         cli_args.recipients.clone()
     };
 
-    if recipients.is_empty() && !cli_args.read_recipients_from_headers {
+    // Check again in case the recipients were read from headers
+    if recipients.is_empty() {
         let _ = writeln!(stderr, "sendmail: No recipients specified");
         return 1;
     }
@@ -76,19 +77,12 @@ pub fn run_sendmail(
     // Extract From address from headers
     let header_from = parser::header_values(&headers, "From")
         .next()
-        .and_then(|value| {
-            parser::parse_mailbox_header(value)
-                .map_err(|e| {
-                    error!("Failed to parse From header: {}", e);
-                    e
-                })
-                .ok()
-                .flatten()
-        });
+        .and_then(|value| parser::parse_mailbox_header(value).ok().flatten());
 
-    let envelope_from = cli_args.from.or(header_from).unwrap_or_else(|| {
-        EmailAddress::from_str("nobody@localhost").expect("Failed to parse default from address")
-    });
+    let envelope_from = cli_args
+        .from
+        .or(header_from)
+        .unwrap_or_else(|| EmailAddress::from_str("nobody@localhost").unwrap());
 
     let missing_headers =
         generate_missing_headers(&headers, &envelope_from, cli_args.fullname.as_deref());
@@ -115,13 +109,12 @@ fn generate_missing_headers(
     let mut headers_to_add = Vec::new();
 
     if !parser::has_header(headers, "From") {
-        let from_header = if let Some(name) = fullname {
-            // Format as "Full Name" <email@example.com>
-            // Escape quotes in the name if present
-            let escaped_name = name.replace('\\', "\\\\").replace('"', "\\\"");
-            format!("From: \"{}\" <{}>", escaped_name, from.as_str())
-        } else {
-            format!("From: {}", from.as_str())
+        let from_header = match fullname {
+            Some(name) => {
+                let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+                format!("From: \"{}\" <{}>", escaped, from.as_str())
+            }
+            None => format!("From: {}", from.as_str()),
         };
         headers_to_add.push(from_header);
     }
@@ -141,40 +134,27 @@ fn generate_missing_headers(
 /// Headers are inserted at the top of the email (before other headers).
 fn prepend_headers(raw_email: &str, headers: &[String]) -> String {
     if headers.is_empty() {
-        return raw_email.to_string();
+        raw_email.to_string()
+    } else {
+        format!("{}\r\n{}", headers.join("\r\n"), raw_email)
     }
-
-    // Add headers at the top, then the rest of the email
-    headers.join("\r\n") + "\r\n" + raw_email
 }
 
 /// Format current date/time in RFC 5322 format using lettre's Date API.
 fn format_rfc5322_date() -> String {
-    // Date implements HeaderValue which can be formatted
-    // We can use a MessageBuilder to format the date header and extract it
     use lettre::message::{Mailbox, MessageBuilder};
-    // Build a minimal message with the date to get the formatted string
-    // MessageBuilder requires From and To addresses
-    let dummy_from: Mailbox = "nobody@localhost".parse().unwrap();
-    let dummy_to: Mailbox = "nobody@localhost".parse().unwrap();
+    let dummy: Mailbox = "nobody@localhost".parse().unwrap();
     let message = MessageBuilder::new()
-        .from(dummy_from)
-        .to(dummy_to)
+        .from(dummy.clone())
+        .to(dummy)
         .date_now()
         .body(String::new())
         .unwrap();
-    // Format the message and extract the Date header value
-    // formatted() returns Vec<u8>, convert to string
-    let formatted_bytes = message.formatted();
-    let formatted_str = String::from_utf8_lossy(&formatted_bytes);
-    // Parse the Date header from the formatted message
-    for line in formatted_str.lines() {
-        if let Some(content) = line.strip_prefix("Date: ") {
-            return content.trim().to_string();
-        }
-    }
-    // Fail if Date header is not found - this should never happen
-    panic!("Failed to extract Date header from lettre formatted message");
+    String::from_utf8_lossy(&message.formatted())
+        .lines()
+        .find_map(|line| line.strip_prefix("Date: "))
+        .map(|s| s.trim().to_string())
+        .expect("Date header not found in formatted message")
 }
 
 /// Generate a unique Message-ID header value using UUID format: <UUID@domain>

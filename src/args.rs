@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 /// Parse an email address from a string for clap
 fn parse_email(s: &str) -> Result<EmailAddress, String> {
-    EmailAddress::from_str(s).map_err(|_| "Invalid email address: ".to_string() + s)
+    EmailAddress::from_str(s).map_err(|_| format!("Invalid email address: {}", s))
 }
 
 #[derive(Parser, Debug)]
