@@ -31,8 +31,11 @@ impl EmailBackend for FileBackend {
             .open(&self.path)
             .context("Failed to open file for writing")?;
 
-        writeln!(file, "Envelope-From: {}\nEnvelope-To: {}\n---\n{}\n---", 
-                 envelope_from, envelope_to.join(", "), raw_email)?;
+        writeln!(file, "Envelope-From: {}", envelope_from)?;
+        writeln!(file, "Envelope-To: {}", envelope_to.join(", "))?;
+        writeln!(file, "---")?;
+        writeln!(file, "{}", raw_email)?;
+        writeln!(file, "---")?;
 
         debug!("File backend: write complete");
         Ok(())
