@@ -50,6 +50,9 @@ url = "2.5"
 socket2 = "=0.5.5"
 libc = "=0.2.169"
 
+[dev-dependencies]
+tiny_http = "0.12"
+
 [patch.crates-io]
 socket2 = { git = "https://github.com/wasix-org/socket2.git", branch = "v0.5.5" }
 libc = { git = "https://github.com/wasix-org/libc.git", branch = "wasix-0.2.169" }
