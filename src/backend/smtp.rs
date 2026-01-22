@@ -103,19 +103,18 @@ impl EmailBackend for SmtpBackend {
 
         // Parse Subject header if present (most common header)
         // Other headers will remain in the body
-        let subject = headers.iter()
-            .find_map(|line| {
-                let trimmed = line.trim();
-                trimmed.find(':').and_then(|colon_pos| {
-                    let header_name = trimmed[..colon_pos].trim();
-                    if header_name.eq_ignore_ascii_case("Subject") {
-                        Some(trimmed[colon_pos + 1..].trim())
-                    } else {
-                        None
-                    }
-                })
-            });
-        
+        let subject = headers.iter().find_map(|line| {
+            let trimmed = line.trim();
+            trimmed.find(':').and_then(|colon_pos| {
+                let header_name = trimmed[..colon_pos].trim();
+                if header_name.eq_ignore_ascii_case("Subject") {
+                    Some(trimmed[colon_pos + 1..].trim())
+                } else {
+                    None
+                }
+            })
+        });
+
         if let Some(subject_value) = subject {
             builder = builder.subject(subject_value);
             debug!("SMTP backend: subject={}", subject_value);
@@ -168,7 +167,9 @@ fn parse_raw_email(email: &str) -> (Vec<String>, String) {
         .iter()
         .map(|&s| s.to_string())
         .collect();
-    let body = lines.get(body_start..).map_or(String::new(), |b| b.join("\n"));
+    let body = lines
+        .get(body_start..)
+        .map_or(String::new(), |b| b.join("\n"));
 
     (headers, body)
 }

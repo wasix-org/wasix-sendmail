@@ -81,8 +81,7 @@ pub fn parse_mailboxes_header(value: &str) -> Result<Vec<EmailAddress>, ParseErr
         .iter()
         .map(|mailbox| {
             let addr_str = mailbox.email.to_string();
-            EmailAddress::from_str(&addr_str)
-                .map_err(|_| ParseError::InvalidEmail(addr_str))
+            EmailAddress::from_str(&addr_str).map_err(|_| ParseError::InvalidEmail(addr_str))
         })
         .collect()
 }
@@ -97,16 +96,18 @@ pub fn parse_mailbox_header(value: &str) -> Result<Option<EmailAddress>, ParseEr
         .map_err(|_| ParseError::InvalidEmail(value.to_string()))?;
 
     let mailbox_vec: Vec<_> = mailboxes.iter().collect();
-    
+
     if mailbox_vec.len() > 1 {
         debug!("Multiple addresses found in mailbox header; using the first");
     }
 
-    mailbox_vec.first().map(|mailbox| {
-        let addr_str = mailbox.email.to_string();
-        EmailAddress::from_str(&addr_str)
-            .map_err(|_| ParseError::InvalidEmail(addr_str))
-    }).transpose()
+    mailbox_vec
+        .first()
+        .map(|mailbox| {
+            let addr_str = mailbox.email.to_string();
+            EmailAddress::from_str(&addr_str).map_err(|_| ParseError::InvalidEmail(addr_str))
+        })
+        .transpose()
 }
 
 /// Return all header values for a header name (case-insensitive).

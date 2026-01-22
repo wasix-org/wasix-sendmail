@@ -21,7 +21,11 @@ impl EmailBackend for FileBackend {
         envelope_to: &[&str],
         raw_email: &str,
     ) -> Result<(), BackendError> {
-        info!("File backend: writing message to {} ({} recipient(s))", self.path, envelope_to.len());
+        info!(
+            "File backend: writing message to {} ({} recipient(s))",
+            self.path,
+            envelope_to.len()
+        );
         debug!("File backend: envelope-from={}", envelope_from);
         trace!("File backend: raw_email_bytes={}", raw_email.len());
 

@@ -43,9 +43,7 @@ pub trait EmailBackend: Send + Sync {
 
 /// Helper to lookup an environment variable by key
 fn get_env(envs: &[(String, String)], key: &str) -> Option<String> {
-    envs.iter()
-        .find(|(k, _)| k == key)
-        .map(|(_, v)| v.clone())
+    envs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
 }
 
 /// Create a backend instance based on environment variables.
@@ -57,7 +55,10 @@ pub fn create_from_env(envs: &[(String, String)]) -> Box<dyn EmailBackend> {
     let backend_env = get_env(envs, "SENDMAIL_BACKEND");
     let backend_type = backend_env.as_deref().unwrap_or("file");
 
-    debug!("Selecting backend via env SENDMAIL_BACKEND={}", backend_type);
+    debug!(
+        "Selecting backend via env SENDMAIL_BACKEND={}",
+        backend_type
+    );
 
     match backend_type {
         "smtp" => {
@@ -77,7 +78,10 @@ pub fn create_from_env(envs: &[(String, String)]) -> Box<dyn EmailBackend> {
         }
         other => {
             if other != "file" {
-                warn!("Unknown SENDMAIL_BACKEND={}; falling back to file backend", other);
+                warn!(
+                    "Unknown SENDMAIL_BACKEND={}; falling back to file backend",
+                    other
+                );
             }
             info!("Using file backend");
             let path = get_env(envs, "SENDMAIL_FILE_PATH")
