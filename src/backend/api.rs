@@ -28,37 +28,19 @@ impl EmailBackend for ApiBackend {
         envelope_to: &[&EmailAddress],
         raw_email: &str,
     ) -> Result<(), BackendError> {
-        info!(
-            "API backend: sending via {} ({} recipient(s))",
-            self.url,
-            envelope_to.len()
-        );
-        debug!("API backend: envelope-from={}", envelope_from.as_str());
-        debug!("API backend: default sender={}", self.default_sender);
-        trace!("API backend: raw_email_bytes={}", raw_email.len());
-
         if self.url.is_empty() {
             return Err(BackendError::ApiUrlNotProvided);
-        }
-        if envelope_to.is_empty() {
-            debug!("API backend: empty recipient list; nothing to send");
-            return Ok(());
         }
 
         // Use envelope_from, converting to string for API
         let sender = envelope_from.as_str();
 
-        // Build query parameters
         let mut url = Url::parse(&self.url).context("Failed to parse API URL")?;
         url.query_pairs_mut().append_pair("sender", sender);
-
         for recipient in envelope_to {
             url.query_pairs_mut()
                 .append_pair("recipients", recipient.as_str());
         }
-
-        debug!("API backend: POST {}", url);
-        trace!("API backend: Authorization: Bearer [REDACTED]");
 
         // Send the request with ureq
         let response = ureq::post(url.as_str())
@@ -68,66 +50,39 @@ impl EmailBackend for ApiBackend {
             .send_string(raw_email);
 
         let (status, response_body) = match response {
-            Ok(resp) => (resp.status(), resp.into_string().ok()),
-            Err(ureq::Error::Status(code, resp)) => (code, resp.into_string().ok()),
+            Ok(_) => {
+                info!("API backend: message accepted for delivery");
+                return Ok(());
+            }
             Err(ureq::Error::Transport(e)) => {
                 return Err(BackendError::NetworkError(anyhow::anyhow!(
                     "HTTP transport error: {}",
                     e
                 )))
             }
+            Err(ureq::Error::Status(code, resp)) => (code, resp.into_string().ok()),
         };
 
-        debug!("API backend: response status={}", status);
+        debug!(
+            "API backend: error with status={} and message={:?}",
+            status, response_body
+        );
 
-        let get_error_msg = |body: Option<String>, default: &str| {
-            let body = body.unwrap_or_else(|| default.to_string());
-            if body.len() <= 100 {
-                body
-            } else {
-                // Truncate safely at a valid UTF-8 boundary near 100 bytes
-                let mut idx = 100;
-                while !body.is_char_boundary(idx) {
-                    idx -= 1;
-                }
-                body[..idx].to_string()
-            }
+        let error_msg_from_code = match status {
+            200..=299 => "Ok",
+            400 => "Invalid request",
+            401 => "Unauthorized",
+            402 => "Quota exceeded",
+            403 => "Forbidden",
+            413 => "Message too large",
+            500..=599 => "Server error",
+            _ => "Unknown error",
         };
 
-        match status {
-            202 => {
-                info!("API backend: message accepted for delivery");
-                Ok(())
-            }
-            400 => {
-                let error_msg = get_error_msg(response_body, "Invalid request");
-                Err(BackendError::ApiBadRequest(error_msg))
-            }
-            401 => {
-                let error_msg = get_error_msg(response_body, "Unauthorized");
-                Err(BackendError::ApiUnauthorized(error_msg))
-            }
-            402 => {
-                let error_msg = get_error_msg(response_body, "Quota exceeded");
-                Err(BackendError::ApiQuotaExceeded(error_msg))
-            }
-            403 => {
-                let error_msg = get_error_msg(response_body, "Forbidden");
-                Err(BackendError::ApiForbidden(error_msg))
-            }
-            413 => {
-                let error_msg = get_error_msg(response_body, "Message too large");
-                Err(BackendError::ApiMessageTooLarge(error_msg))
-            }
-            500..=599 => {
-                let error_msg = get_error_msg(response_body, "Server error");
-                Err(BackendError::ApiServerError(status, error_msg))
-            }
-            _ => {
-                let error_msg = get_error_msg(response_body, "Unexpected error");
-                Err(BackendError::ApiUnexpectedStatus(status, error_msg))
-            }
-        }
+        let mut error_msg = response_body.unwrap_or(error_msg_from_code.into());
+        error_msg.truncate(100);
+
+        return Err(BackendError::ApiBadRequest(error_msg));
     }
 
     fn default_sender(&self) -> EmailAddress {

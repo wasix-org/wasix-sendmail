@@ -3,7 +3,7 @@ use lettre::{
     address::{Address, Envelope},
     transport::smtp::{
         authentication::{Credentials, Mechanism},
-        client::{CertificateStore, TlsParameters},
+        client::{CertificateStore, Tls, TlsParameters},
     },
     SmtpTransport, Transport,
 };
@@ -16,10 +16,19 @@ pub struct SmtpBackend {
     transport: SmtpTransport,
 }
 
+pub enum TlsMode {
+    Plain,
+    Tls,
+    StartTls,
+    /// Attempt starttls if available, otherwise use plaintext
+    StartTlsIfAvailable,
+}
+
 impl SmtpBackend {
     pub fn new(
         host: String,
         port: u16,
+        tls_mode: TlsMode,
         username: Option<String>,
         password: Option<String>,
     ) -> Result<Self, BackendError> {
@@ -29,34 +38,35 @@ impl SmtpBackend {
             return Err(BackendError::HostNotProvided);
         }
 
-        // Validate authentication
-        let credentials = if username.is_some() || password.is_some() {
-            let (Some(username), Some(password)) = (username, password) else {
-                return Err(BackendError::OnlyUsernameOrPasswordProvided);
-            };
-            Some(Credentials::new(username, password))
-        } else {
-            None
-        };
-
-        // TLS params
-        let tls: TlsParameters = TlsParameters::builder(host.clone())
+        let tls_params = TlsParameters::builder(host.clone())
             .certificate_store(CertificateStore::Default)
             .build_rustls()
             .context("Failed to build certificate store")?;
 
-        // Transport builder
+        let tls = match tls_mode {
+            TlsMode::Plain => Tls::None,
+            TlsMode::Tls => Tls::Wrapper(tls_params),
+            TlsMode::StartTls => Tls::Required(tls_params),
+            TlsMode::StartTlsIfAvailable => Tls::Opportunistic(tls_params),
+        };
+
         let mut transport = SmtpTransport::relay(&host)
             .context("Invalid host name")?
             .port(port)
-            .tls(lettre::transport::smtp::client::Tls::Opportunistic(tls));
+            .tls(tls);
 
-        // Authentication
-        if let Some(credentials) = credentials {
+        if username.is_some() || password.is_some() {
+            debug!("SMTP relay backend: using authentication");
+            let (Some(username), Some(password)) = (username, password) else {
+                return Err(BackendError::OnlyUsernameOrPasswordProvided);
+            };
+            let credentials = Credentials::new(username, password);
             transport = transport
-                .authentication(vec![Mechanism::Login])
+                .authentication(vec![Mechanism::Plain, Mechanism::Login])
                 .credentials(credentials);
-        }
+        } else {
+            debug!("SMTP relay backend: not using authentication because no username or password was provided");
+        };
 
         let transport = transport.build();
 
@@ -71,17 +81,6 @@ impl EmailBackend for SmtpBackend {
         envelope_to: &[&EmailAddress],
         raw_email: &str,
     ) -> Result<(), BackendError> {
-        info!(
-            "SMTP relay backend: sending from {} to {} recipient(s)",
-            envelope_from,
-            envelope_to.len()
-        );
-
-        if envelope_to.is_empty() {
-            debug!("SMTP relay backend: empty recipient list; nothing to send");
-            return Ok(());
-        }
-
         let raw_email_bytes = raw_email.as_bytes();
 
         let lettre_envelope_to = envelope_to
@@ -92,13 +91,12 @@ impl EmailBackend for SmtpBackend {
             .collect::<Vec<_>>();
         let lettre_envelope_from =
             Address::new(envelope_from.local_part(), envelope_from.domain()).unwrap();
-        let envelope = Envelope::new(Some(lettre_envelope_from), lettre_envelope_to)
+        let lettre_envelope = Envelope::new(Some(lettre_envelope_from), lettre_envelope_to)
             .context("Failed to create envelope")?;
 
         self.transport
-            .send_raw(&envelope, raw_email_bytes)
+            .send_raw(&lettre_envelope, raw_email_bytes)
             .context("Failed to send mail")?;
-        info!("SMTP relay backend: send complete");
         Ok(())
     }
 }
@@ -109,7 +107,14 @@ mod tests {
 
     #[test]
     fn test_smtp_backend_default_sender() {
-        let backend = SmtpBackend::new("smtp.example.com".to_string(), 587, None, None).unwrap();
+        let backend = SmtpBackend::new(
+            "smtp.example.com".to_string(),
+            587,
+            TlsMode::StartTlsIfAvailable,
+            None,
+            None,
+        )
+        .unwrap();
         let default_sender = backend.default_sender();
         // The default sender should be username@localhost
         assert!(default_sender.as_str().ends_with("@localhost"));

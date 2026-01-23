@@ -2,14 +2,15 @@ pub mod api;
 pub mod file;
 pub mod smtp;
 
+use std::path::PathBuf;
 use std::str::FromStr;
 
 pub use api::ApiBackend;
 pub use file::FileBackend;
 pub use smtp::SmtpBackend;
 
-use crate::args::BackendConfig;
 use crate::parser::EmailAddress;
+use crate::{args::BackendConfig, backend::smtp::TlsMode};
 use log::{debug, info, warn};
 
 #[derive(thiserror::Error, Debug)]
@@ -93,9 +94,9 @@ pub trait EmailBackend: Send + Sync {
 pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend>, BackendError> {
     // Priority 1: File backend
     if let Some(file_path) = &config.file.file_path {
-        info!("Using file backend");
-        debug!("File backend: path={}", file_path);
-        return Ok(Box::new(FileBackend::new(file_path.clone())));
+        let path = PathBuf::from(file_path);
+        info!("Using file backend to {}", path.display());
+        return Ok(Box::new(FileBackend::new(path)?));
     }
 
     // Priority 2: SMTP relay
@@ -120,6 +121,7 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
         return Ok(Box::new(SmtpBackend::new(
             relay_host.clone(),
             port,
+            TlsMode::StartTlsIfAvailable,
             username,
             password,
         )?));

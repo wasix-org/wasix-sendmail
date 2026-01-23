@@ -1,17 +1,30 @@
-use anyhow::Context;
-use std::io::Write;
+use anyhow::{bail, Context};
+use std::{fs::File, io::Write, path::PathBuf, sync::Mutex};
 
 use super::{BackendError, EmailBackend};
 use crate::parser::EmailAddress;
 use log::{debug, info, trace};
 
 pub struct FileBackend {
-    path: String,
+    path: PathBuf,
 }
 
 impl FileBackend {
-    pub fn new(path: String) -> Self {
-        Self { path }
+    pub fn new(path: PathBuf) -> Result<Self, BackendError> {
+        let path = PathBuf::from(".").join(path);
+        let parent_dir = path
+            .parent()
+            .context("Failed to get parent directory of the output file")?
+            .canonicalize()
+            .context("Parent directory of the output file does not exist")?;
+        let basename = path
+            .file_name()
+            .context("Failed to get basename of the output file")?;
+        let absolute_path = parent_dir.join(basename);
+
+        Ok(Self {
+            path: absolute_path,
+        })
     }
 }
 
@@ -22,17 +35,9 @@ impl EmailBackend for FileBackend {
         envelope_to: &[&EmailAddress],
         raw_email: &str,
     ) -> Result<(), BackendError> {
-        info!(
-            "File backend: writing message to {} ({} recipient(s))",
-            self.path,
-            envelope_to.len()
-        );
-        debug!("File backend: envelope-from={}", envelope_from.as_str());
-        trace!("File backend: raw_email_bytes={}", raw_email.len());
-
         let mut file = std::fs::OpenOptions::new()
-            .create(true)
             .append(true)
+            .create(true)
             .open(&self.path)
             .context("Failed to open file for writing")?;
 
@@ -46,8 +51,6 @@ impl EmailBackend for FileBackend {
         writeln!(file, "---")?;
         writeln!(file, "{}", raw_email)?;
         writeln!(file, "---")?;
-
-        debug!("File backend: write complete");
         Ok(())
     }
 }
@@ -74,7 +77,7 @@ mod tests {
     #[test]
     fn test_file_backend_single_recipient() {
         let temp_file = create_temp_file();
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email =
             "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nTest body";
 
@@ -94,7 +97,7 @@ mod tests {
     #[test]
     fn test_file_backend_multiple_recipients() {
         let temp_file = create_temp_file();
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender@example.com\nSubject: Test\n\nTest body";
 
         let from = EmailAddress::from_str("sender@example.com").unwrap();
@@ -115,7 +118,7 @@ mod tests {
     #[test]
     fn test_file_backend_empty_recipients() {
         let temp_file = create_temp_file();
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender@example.com\nSubject: Test\n\nTest body";
 
         let from = EmailAddress::from_str("sender@example.com").unwrap();
@@ -131,7 +134,7 @@ mod tests {
     #[test]
     fn test_file_backend_appends_to_file() {
         let temp_file = create_temp_file();
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email1 = "From: sender1@example.com\nSubject: First\n\nFirst email";
         let raw_email2 = "From: sender2@example.com\nSubject: Second\n\nSecond email";
 
@@ -173,7 +176,7 @@ mod tests {
     #[test]
     fn test_file_backend_file_format() {
         let temp_file = create_temp_file();
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email =
             "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nTest body";
 
@@ -207,7 +210,7 @@ mod tests {
     #[test]
     fn test_file_backend_empty_email_body() {
         let temp_file = create_temp_file();
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\n";
 
         let from = EmailAddress::from_str("sender@example.com").unwrap();
@@ -224,7 +227,7 @@ mod tests {
     #[test]
     fn test_file_backend_special_characters() {
         let temp_file = create_temp_file();
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender+test@example.com\nTo: recipient@example.com\nSubject: Test with special chars: !@#$%\n\nBody with special chars: àáâãäå";
 
         let from = EmailAddress::from_str("sender+test@example.com").unwrap();
@@ -241,7 +244,7 @@ mod tests {
     #[test]
     fn test_file_backend_multiline_email() {
         let temp_file = create_temp_file();
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nLine 1\nLine 2\nLine 3";
 
         let from = EmailAddress::from_str("sender@example.com").unwrap();
@@ -259,7 +262,7 @@ mod tests {
     #[test]
     fn test_file_backend_default_sender() {
         let temp_file = create_temp_file();
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let default_sender = backend.default_sender();
         // The default sender should be username@localhost
         assert!(default_sender.as_str().ends_with("@localhost"));

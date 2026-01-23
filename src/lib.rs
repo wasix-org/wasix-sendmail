@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn test_file_backend() {
         let temp_file = std::env::temp_dir().join("test_email.txt");
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email =
             "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nTest body";
         let from = EmailAddress::from_str("sender@example.com").unwrap();
