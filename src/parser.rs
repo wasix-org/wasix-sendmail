@@ -1,17 +1,8 @@
-use log::{debug, trace};
+use log::trace;
+use rootcause::prelude::*;
 use std::str::FromStr;
-use thiserror::Error;
 
-pub mod email_parser;
-
-pub use email_address::EmailAddress;
-use lettre::message::Mailboxes;
-
-#[derive(Error, Debug)]
-pub enum ParseError {
-    #[error("Invalid email address: {0}")]
-    InvalidEmail(String),
-}
+use lettre::{Address, message::Mailboxes};
 
 /// A parsed email header field with unfolded value
 #[derive(Debug, Clone)]
@@ -72,16 +63,16 @@ pub fn parse_email_headers(email: &str) -> Vec<HeaderField> {
 ///
 /// This function parses header values like "To", "Cc", "Bcc" that contain mailbox lists.
 /// Returns a vector of validated email addresses.
-pub fn parse_mailboxes_header(value: &str) -> Result<Vec<EmailAddress>, ParseError> {
+pub fn parse_mailboxes_header(value: &str) -> Result<Vec<Address>, Report> {
     let mailboxes: Mailboxes = value
         .parse()
-        .map_err(|_| ParseError::InvalidEmail(value.to_string()))?;
+        .map_err(|_| report!("Invalid email address: {}", value))?;
 
     mailboxes
         .iter()
         .map(|mailbox| {
             let addr_str = mailbox.email.to_string();
-            EmailAddress::from_str(&addr_str).map_err(|_| ParseError::InvalidEmail(addr_str))
+            Address::from_str(&addr_str).map_err(|_| report!("Invalid email address: {}", addr_str))
         })
         .collect()
 }
@@ -90,24 +81,19 @@ pub fn parse_mailboxes_header(value: &str) -> Result<Vec<EmailAddress>, ParseErr
 ///
 /// This is useful for headers like "From" where we typically want the first address
 /// even if multiple are present.
-pub fn parse_mailbox_header(value: &str) -> Result<Option<EmailAddress>, ParseError> {
-    let mailboxes: Mailboxes = value
-        .parse()
-        .map_err(|_| ParseError::InvalidEmail(value.to_string()))?;
+pub fn parse_mailbox_header(value: &str) -> Result<Address, Report> {
+    let mut mailboxes = parse_mailboxes_header(value)?;
 
-    let mailbox_vec: Vec<_> = mailboxes.iter().collect();
-
-    if mailbox_vec.len() > 1 {
-        debug!("Multiple addresses found in mailbox header; using the first");
+    let mailboxes_len = mailboxes.len();
+    match mailboxes_len {
+        0 => Err(report!("No address in the From: header")),
+        1 => Ok(mailboxes.pop().unwrap()),
+        _ => Err(report!(
+            "More than one address in the From: header {:?}\n{}",
+            mailboxes,
+            value
+        )),
     }
-
-    mailbox_vec
-        .first()
-        .map(|mailbox| {
-            let addr_str = mailbox.email.to_string();
-            EmailAddress::from_str(&addr_str).map_err(|_| ParseError::InvalidEmail(addr_str))
-        })
-        .transpose()
 }
 
 /// Return all header values for a header name (case-insensitive).
@@ -147,46 +133,37 @@ mod tests {
         let value = "recipient1@example.com, recipient2@example.com";
         let addresses = parse_mailboxes_header(value).unwrap();
         assert_eq!(addresses.len(), 2);
-        assert_eq!(addresses[0].as_str(), "recipient1@example.com");
-        assert_eq!(addresses[1].as_str(), "recipient2@example.com");
+        assert_eq!(addresses[0].to_string(), "recipient1@example.com");
+        assert_eq!(addresses[1].to_string(), "recipient2@example.com");
     }
 
     #[test]
     fn test_parse_mailbox_header() {
         let value = "sender@example.com";
         let address = parse_mailbox_header(value).unwrap();
-        assert_eq!(
-            address.as_ref().map(|e| e.as_str()),
-            Some("sender@example.com")
-        );
+        assert_eq!(address.to_string(), "sender@example.com");
     }
 
     #[test]
     fn test_parse_mailbox_header_with_display_name() {
         let value = "\"Sender Name\" <sender@example.com>";
         let address = parse_mailbox_header(value).unwrap();
-        assert_eq!(
-            address.as_ref().map(|e| e.as_str()),
-            Some("sender@example.com")
-        );
+        assert_eq!(address.to_string(), "sender@example.com");
     }
 
     #[test]
     fn test_parse_mailbox_header_multiple() {
         let value = "first@example.com, second@example.com";
-        let address = parse_mailbox_header(value).unwrap();
-        // Should return first address
-        assert_eq!(
-            address.as_ref().map(|e| e.as_str()),
-            Some("first@example.com")
-        );
+        // Should fail
+        parse_mailbox_header(value).unwrap_err();
+        // Should succeed
+        parse_mailboxes_header(value).unwrap();
     }
 
     #[test]
     fn test_parse_mailbox_header_empty() {
         let value = "";
-        let address = parse_mailbox_header(value).unwrap();
-        assert_eq!(address, None);
+        parse_mailbox_header(value).unwrap_err();
     }
 
     #[test]
@@ -194,7 +171,8 @@ mod tests {
         let value = "invalid-email";
         let result = parse_mailboxes_header(value);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ParseError::InvalidEmail(_)));
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Invalid email address"));
     }
 
     #[test]
@@ -202,7 +180,8 @@ mod tests {
         let value = "invalid-email";
         let result = parse_mailbox_header(value);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ParseError::InvalidEmail(_)));
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("Invalid email address"));
     }
 
     #[test]
@@ -212,26 +191,22 @@ mod tests {
         let headers = parse_email_headers(email);
         let to_value = header_values(&headers, "To").next().unwrap();
         let addresses = parse_mailboxes_header(to_value).unwrap();
-        let recipient_strs: Vec<&str> = addresses.iter().map(|e| e.as_str()).collect();
+        let recipient_strs: Vec<String> = addresses.iter().map(|e| e.to_string()).collect();
         assert_eq!(recipient_strs, vec!["a@example.com", "b@example.com"]);
     }
 
     #[test]
     fn rfc5322_mailbox_parsing_allows_display_name() {
-        let email =
-            "From: \"Sender Name\" <sender@example.com>\nTo: Recipient <to@example.com>\nSubject: Names\n\nBody";
+        let email = "From: \"Sender Name\" <sender@example.com>\nTo: Recipient <to@example.com>\nSubject: Names\n\nBody";
         let headers = parse_email_headers(email);
         let from_value = header_values(&headers, "From").next().unwrap();
         let from = parse_mailbox_header(from_value).unwrap();
-        assert_eq!(
-            from.as_ref().map(|e| e.as_str()),
-            Some("sender@example.com")
-        );
+        assert_eq!(from.to_string(), "sender@example.com");
 
         let to_value = header_values(&headers, "To").next().unwrap();
         let to_addresses = parse_mailboxes_header(to_value).unwrap();
         assert_eq!(to_addresses.len(), 1);
-        assert_eq!(to_addresses[0].as_str(), "to@example.com");
+        assert_eq!(to_addresses[0].to_string(), "to@example.com");
     }
 
     #[test]
@@ -241,14 +216,11 @@ mod tests {
         let headers = parse_email_headers(email);
         let from_value = header_values(&headers, "From").next().unwrap();
         let from = parse_mailbox_header(from_value).unwrap();
-        assert_eq!(
-            from.as_ref().map(|e| e.as_str()),
-            Some("sender@example.com")
-        );
+        assert_eq!(from.to_string(), "sender@example.com");
 
         let to_value = header_values(&headers, "To").next().unwrap();
         let addresses = parse_mailboxes_header(to_value).unwrap();
-        let recipient_strs: Vec<&str> = addresses.iter().map(|e| e.as_str()).collect();
+        let recipient_strs: Vec<String> = addresses.iter().map(|e| e.to_string()).collect();
         assert_eq!(recipient_strs, vec!["a@example.com", "b@example.com"]);
     }
 

@@ -1,24 +1,18 @@
+pub mod api;
 pub mod file;
 pub mod smtp;
 
+use std::path::PathBuf;
+use std::str::FromStr;
+
+pub use api::ApiBackend;
 pub use file::FileBackend;
+use lettre::Address;
 pub use smtp::SmtpBackend;
 
+use crate::{args::BackendConfig, backend::smtp::TlsMode};
 use log::{debug, info, warn};
-
-#[derive(thiserror::Error, Debug)]
-pub enum BackendError {
-    #[error("Host not provided")]
-    HostNotProvided,
-    #[error("From address not provided")]
-    FromNotProvided,
-    #[error("Username and password must be provided together")]
-    OnlyUsernameOrPasswordProvided,
-    #[error("{0}")]
-    NetworkError(#[from] anyhow::Error),
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-}
+use rootcause::prelude::*;
 
 /// Backend trait mirroring POSIX sendmail interface.
 ///
@@ -35,59 +29,99 @@ pub trait EmailBackend: Send + Sync {
     /// * `raw_email` - Raw email content as read from stdin (headers + body)
     fn send(
         &self,
-        envelope_from: &str,
-        envelope_to: &[&str],
+        envelope_from: &Address,
+        envelope_to: &[&Address],
         raw_email: &str,
-    ) -> Result<(), BackendError>;
-}
+    ) -> Result<(), Report>;
 
-/// Helper to lookup an environment variable by key
-fn get_env(envs: &[(String, String)], key: &str) -> Option<String> {
-    envs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
-}
-
-/// Create a backend instance based on environment variables.
-///
-/// Reads `SENDMAIL_BACKEND` to determine the backend type:
-/// - `"smtp"` - Creates an SMTP backend (requires `SMTP_HOST`, `SMTP_PORT`, optionally `SMTP_USERNAME`/`SMTP_PASSWORD`)
-/// - `"file"` or any other value - Creates a file backend (uses `SENDMAIL_FILE_PATH` or defaults to `/tmp/sendmail_output.txt`)
-pub fn create_from_env(envs: &[(String, String)]) -> Box<dyn EmailBackend> {
-    let backend_env = get_env(envs, "SENDMAIL_BACKEND");
-    let backend_type = backend_env.as_deref().unwrap_or("file");
-
-    debug!(
-        "Selecting backend via env SENDMAIL_BACKEND={}",
-        backend_type
-    );
-
-    match backend_type {
-        "smtp" => {
-            info!("Using SMTP backend");
-            let host = get_env(envs, "SMTP_HOST").unwrap_or_else(|| "localhost".to_string());
-            let port = get_env(envs, "SMTP_PORT")
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(587);
-            let username = get_env(envs, "SMTP_USERNAME");
-            let password = get_env(envs, "SMTP_PASSWORD");
-
-            debug!("Creating SMTP backend: host={} port={}", host, port);
-            if username.is_some() ^ password.is_some() {
-                warn!("SMTP credentials misconfigured: only one of SMTP_USERNAME/SMTP_PASSWORD is set");
-            }
-            Box::new(SmtpBackend::new(host, port, username, password))
-        }
-        other => {
-            if other != "file" {
-                warn!(
-                    "Unknown SENDMAIL_BACKEND={}; falling back to file backend",
-                    other
-                );
-            }
-            info!("Using file backend");
-            let path = get_env(envs, "SENDMAIL_FILE_PATH")
-                .unwrap_or_else(|| "/tmp/sendmail_output.txt".to_string());
-            debug!("Creating file backend: path={}", path);
-            Box::new(FileBackend::new(path))
-        }
+    /// Get the default sender address for this backend.
+    ///
+    /// Returns the default sender email address. For most backends this is
+    /// `username@localhost`, but for API backends it returns the configured sender.
+    fn default_sender(&self) -> Address {
+        // TODO: Get the username from the system without using whoami, because that introduces a bunch of weird dependencies.
+        let username = "nobody";
+        let sender_str = format!("{}@localhost", username);
+        Address::from_str(&sender_str).expect("username@localhost should be a valid email address")
     }
+}
+
+/// Create a backend instance based on configuration.
+///
+/// Backend selection priority order:
+/// 1. File backend (if SENDMAIL_FILE_PATH is set)
+/// 2. SMTP relay (if SENDMAIL_RELAY_HOST is set)
+/// 3. Backend/REST API (if SENDMAIL_API_URL is set)
+///
+/// If no backend is configured, returns an error.
+/// If sending with the selected backend fails, sendmail fails - no fallback to other backends.
+pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend>, Report> {
+    // Priority 1: File backend
+    if let Some(file_path) = &config.file.file_path {
+        let path = PathBuf::from(file_path);
+        info!("Using file backend to {}", path.display());
+        return Ok(Box::new(FileBackend::new(path)?));
+    }
+
+    // Priority 2: SMTP relay
+    if let Some(relay_host) = &config.smtp_relay.relay_host {
+        info!("Using SMTP relay backend");
+        let port = config.smtp_relay.relay_port.unwrap_or(587);
+        let proto = config.smtp_relay.relay_proto.clone();
+        let username = config.smtp_relay.relay_user.clone();
+        let password = config.smtp_relay.relay_pass.clone();
+
+        debug!("SMTP relay: host={} port={}", relay_host, port);
+        if let Some(p) = &proto {
+            debug!("SMTP relay: protocol={}", p);
+        }
+
+        // Validate authentication credentials
+        if username.is_some() != password.is_some() {
+            warn!(
+                "SMTP relay credentials misconfigured: only one of SENDMAIL_RELAY_USER/SENDMAIL_RELAY_PASS is set"
+            );
+            return Err(report!("Username and password must be provided together"));
+        }
+
+        return Ok(Box::new(SmtpBackend::new(
+            relay_host.clone(),
+            port,
+            TlsMode::StartTlsIfAvailable,
+            username,
+            password,
+        )?));
+    }
+
+    // Priority 3: Backend/REST API
+    let api_url_set = config.api.api_url.is_some();
+    let api_sender_set = config.api.api_sender.is_some();
+    let api_token_set = config.api.api_token.is_some();
+
+    if api_url_set || api_sender_set || api_token_set {
+        // Check if all three are set
+        if !api_url_set || !api_sender_set || !api_token_set {
+            return Err(report!(
+                "API configuration incomplete: all three variables (SENDMAIL_API_URL, SENDMAIL_API_SENDER, SENDMAIL_API_TOKEN) must be set"
+            ));
+        }
+
+        info!("Using REST API backend");
+        let url = config.api.api_url.as_ref().unwrap().clone();
+        let sender = config.api.api_sender.as_ref().unwrap();
+        let Ok(sender_email) = Address::from_str(sender) else {
+            return Err(report!("Invalid default sender address: {}", sender));
+        };
+        let token = config.api.api_token.as_ref().unwrap().clone();
+
+        debug!("API backend: url={}", url);
+        debug!("API backend: default sender={}", sender_email);
+
+        return Ok(Box::new(ApiBackend::new(url, sender_email, token)?));
+    }
+
+    // No backend configured - return error
+    Err(report!(
+        "No backend configured. Please set one of: SENDMAIL_FILE_PATH, SENDMAIL_RELAY_HOST, or SENDMAIL_API_URL"
+    ))
 }

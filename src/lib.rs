@@ -1,6 +1,7 @@
 use std::{
     io::{Read, Write},
     str::FromStr,
+    sync::Mutex,
 };
 pub mod args;
 pub mod backend;
@@ -8,42 +9,52 @@ pub mod logger;
 pub mod parser;
 
 use clap::Parser;
-use log::{error, info};
-use parser::EmailAddress;
+use lettre::Address;
+use log::info;
+use rootcause::prelude::*;
 use uuid::Uuid;
 
-pub fn run_sendmail(
+static PARSER_MUTEX: Mutex<()> = Mutex::new(());
+
+/// Run sendmail and return an error report
+pub fn run_sendmail_err(
     stdin: &mut dyn Read,
     _stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
+    _stderr: &mut dyn Write,
     args: &[String],
     envs: &[(String, String)],
-) -> i32 {
+) -> Result<(), Report> {
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let cli_args = match args::SendmailArgs::try_parse_from(args_str) {
-        Ok(args) => args,
-        Err(e) => {
-            let _ = e.print();
-            return 1;
+    let cli_args = {
+        // Mutex to allow running tests in parallel with different environment variables
+        let _guard = PARSER_MUTEX.lock().unwrap();
+        let mut restored_envs = Vec::new();
+        for (key, value) in envs {
+            let previous_value = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            restored_envs.push((key.to_string(), previous_value));
         }
+        let parsed_args = args::SendmailArgs::try_parse_from(args_str)?;
+        for (key, value) in restored_envs {
+            match value {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+        parsed_args
     };
 
     logger::init_logger(cli_args.verbosity);
 
     // Fail early if no recipients specified and not reading from headers
     if !cli_args.read_recipients_from_headers && cli_args.recipients.is_empty() {
-        let _ = writeln!(stderr, "sendmail: No recipients specified");
-        return 1;
+        return Err(report!("No recipients specified"));
     }
 
-    let backend = backend::create_from_env(envs);
+    let backend = backend::create_from_config(&cli_args.backend_config)?;
 
     let mut raw_email = String::new();
-    if let Err(e) = stdin.read_to_string(&mut raw_email) {
-        error!("Failed to read email from stdin: {}", e);
-        let _ = writeln!(stderr, "sendmail: Failed to read email: {}", e);
-        return 1;
-    }
+    stdin.read_to_string(&mut raw_email)?;
 
     let headers = parser::parse_email_headers(&raw_email);
 
@@ -53,14 +64,8 @@ pub fn run_sendmail(
         let mut header_recipients = Vec::new();
         for header_name in &["To", "Cc", "Bcc"] {
             for value in parser::header_values(&headers, header_name) {
-                match parser::parse_mailboxes_header(value) {
-                    Ok(addrs) => header_recipients.extend(addrs),
-                    Err(e) => {
-                        error!("Failed to parse {} header: {}", header_name, e);
-                        let _ = writeln!(stderr, "sendmail: {}", e);
-                        return 1;
-                    }
-                }
+                let addrs = parser::parse_mailboxes_header(value)?;
+                header_recipients.extend(addrs);
             }
         }
         header_recipients
@@ -70,30 +75,39 @@ pub fn run_sendmail(
 
     // Check again in case the recipients were read from headers
     if recipients.is_empty() {
-        let _ = writeln!(stderr, "sendmail: No recipients specified");
-        return 1;
+        return Err(report!("No recipients specified"));
     }
 
     // Extract From address from headers
     let header_from = parser::header_values(&headers, "From")
         .next()
-        .and_then(|value| parser::parse_mailbox_header(value).ok().flatten());
+        .and_then(|value| parser::parse_mailbox_header(value).ok());
 
     let envelope_from = cli_args
         .from
         .or(header_from)
-        .unwrap_or_else(|| EmailAddress::from_str("nobody@localhost").unwrap());
+        .unwrap_or_else(|| Address::from_str("nobody@localhost").unwrap());
 
     let missing_headers =
         generate_missing_headers(&headers, &envelope_from, cli_args.fullname.as_deref());
     let raw_email = prepend_headers(&raw_email, &missing_headers);
 
-    let recipients_refs: Vec<&str> = recipients.iter().map(|e| e.as_str()).collect();
-    match backend.send(envelope_from.as_str(), &recipients_refs, &raw_email) {
+    let recipients_refs: Vec<&Address> = recipients.iter().collect();
+    backend.send(&envelope_from, &recipients_refs, &raw_email)?;
+    Ok(())
+}
+
+pub fn run_sendmail(
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    args: &[String],
+    envs: &[(String, String)],
+) -> i32 {
+    match run_sendmail_err(stdin, stdout, stderr, args, envs) {
         Ok(()) => 0,
         Err(e) => {
-            error!("Failed to send email: {}", e);
-            let _ = writeln!(stderr, "sendmail: {}", e);
+            writeln!(stderr, "{}", e).unwrap();
             1
         }
     }
@@ -103,7 +117,7 @@ pub fn run_sendmail(
 /// Returns a vector of header strings to add.
 fn generate_missing_headers(
     headers: &[parser::HeaderField],
-    from: &EmailAddress,
+    from: &Address,
     fullname: Option<&str>,
 ) -> Vec<String> {
     let mut headers_to_add = Vec::new();
@@ -112,9 +126,9 @@ fn generate_missing_headers(
         let from_header = match fullname {
             Some(name) => {
                 let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
-                format!("From: \"{}\" <{}>", escaped, from.as_str())
+                format!("From: \"{}\" <{}>", escaped, from)
             }
-            None => format!("From: {}", from.as_str()),
+            None => format!("From: {}", from),
         };
         headers_to_add.push(from_header);
     }
@@ -158,7 +172,7 @@ fn format_rfc5322_date() -> String {
 }
 
 /// Generate a unique Message-ID header value using UUID format: <UUID@domain>
-fn generate_message_id(from: &EmailAddress) -> String {
+fn generate_message_id(from: &Address) -> String {
     let uuid = Uuid::new_v4();
     let domain = from.domain();
     format!("<{}@{}>", uuid, domain)
@@ -166,21 +180,22 @@ fn generate_message_id(from: &EmailAddress) -> String {
 
 #[cfg(test)]
 mod tests {
+    use lettre::Address;
+
     use super::{generate_missing_headers, prepend_headers};
     use crate::backend::{EmailBackend, FileBackend};
     use crate::parser::parse_email_headers;
-    use email_address::EmailAddress;
     use std::str::FromStr;
 
     #[test]
     fn test_file_backend() {
         let temp_file = std::env::temp_dir().join("test_email.txt");
-        let backend = FileBackend::new(temp_file.to_string_lossy().to_string());
+        let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email =
             "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nTest body";
-        assert!(backend
-            .send("sender@example.com", &["recipient@example.com"], raw_email)
-            .is_ok());
+        let from = Address::from_str("sender@example.com").unwrap();
+        let to = Address::from_str("recipient@example.com").unwrap();
+        assert!(backend.send(&from, &[&to], raw_email).is_ok());
         let _ = std::fs::remove_file(&temp_file);
     }
 
@@ -188,7 +203,7 @@ mod tests {
     fn test_add_missing_headers_all_missing() {
         let raw_email = "Subject: Test\n\nBody content";
         let headers = parse_email_headers(raw_email);
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
+        let from = Address::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
         let result = prepend_headers(raw_email, &missing);
 
@@ -203,7 +218,7 @@ mod tests {
     fn test_add_missing_headers_from_exists() {
         let raw_email = "From: existing@example.com\nSubject: Test\n\nBody";
         let headers = parse_email_headers(raw_email);
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
+        let from = Address::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
         let result: String = prepend_headers(raw_email, &missing);
 
@@ -218,7 +233,7 @@ mod tests {
     fn test_add_missing_headers_date_exists() {
         let raw_email = "Date: Mon, 1 Jan 2024 12:00:00 +0000\nSubject: Test\n\nBody";
         let headers = parse_email_headers(raw_email);
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
+        let from = Address::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
         let result = prepend_headers(raw_email, &missing);
 
@@ -233,7 +248,7 @@ mod tests {
     fn test_add_missing_headers_message_id_exists() {
         let raw_email = "Message-ID: <test@example.com>\nSubject: Test\n\nBody";
         let headers = parse_email_headers(raw_email);
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
+        let from = Address::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
         let result = prepend_headers(raw_email, &missing);
 
@@ -248,7 +263,7 @@ mod tests {
     fn test_add_missing_headers_no_empty_line() {
         let raw_email = "Subject: Test\nBody content";
         let headers = parse_email_headers(raw_email);
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
+        let from = Address::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, None);
         let result = prepend_headers(raw_email, &missing);
 
@@ -261,7 +276,7 @@ mod tests {
     fn test_add_missing_headers_with_fullname() {
         let raw_email = "Subject: Test\n\nBody content";
         let headers = parse_email_headers(raw_email);
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
+        let from = Address::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, Some("John Doe"));
         let result = prepend_headers(raw_email, &missing);
 
@@ -274,7 +289,7 @@ mod tests {
     fn test_add_missing_headers_with_fullname_escapes_quotes() {
         let raw_email = "Subject: Test\n\nBody content";
         let headers = parse_email_headers(raw_email);
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
+        let from = Address::from_str("sender@example.com").unwrap();
         let missing = generate_missing_headers(&headers, &from, Some("John \"Johnny\" Doe"));
         let result = prepend_headers(raw_email, &missing);
 
