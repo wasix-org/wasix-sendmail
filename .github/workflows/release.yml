@@ -194,11 +194,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
-
-      - name: Move artifacts to root
-        run: |
-          find artifacts -name '*.webc' -exec mv {} . \;
+          name: sendmail.webc
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
