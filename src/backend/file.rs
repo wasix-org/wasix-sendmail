@@ -1,25 +1,32 @@
-use anyhow::{bail, Context};
-use std::{fs::File, io::Write, path::PathBuf, sync::Mutex};
+use std::{io::Write, path::PathBuf};
 
-use super::{BackendError, EmailBackend};
+use super::EmailBackend;
 use crate::parser::EmailAddress;
-use log::{debug, info, trace};
+use rootcause::prelude::*;
 
 pub struct FileBackend {
     path: PathBuf,
 }
 
 impl FileBackend {
-    pub fn new(path: PathBuf) -> Result<Self, BackendError> {
+    pub fn new(path: PathBuf) -> Result<Self, Report> {
         let path = PathBuf::from(".").join(path);
         let parent_dir = path
             .parent()
-            .context("Failed to get parent directory of the output file")?
+            .ok_or_else(|| {
+                report!("Failed to get parent directory of the output file")
+                    .attach(format!("Path: {}", path.display()))
+            })?
             .canonicalize()
-            .context("Parent directory of the output file does not exist")?;
-        let basename = path
-            .file_name()
-            .context("Failed to get basename of the output file")?;
+            .map_err(|e| {
+                report!("Parent directory of the output file does not exist")
+                    .attach(format!("Path: {}", path.display()))
+                    .attach(format!("Error: {}", e))
+            })?;
+        let basename = path.file_name().ok_or_else(|| {
+            report!("Failed to get basename of the output file")
+                .attach(format!("Path: {}", path.display()))
+        })?;
         let absolute_path = parent_dir.join(basename);
 
         Ok(Self {
@@ -34,12 +41,16 @@ impl EmailBackend for FileBackend {
         envelope_from: &EmailAddress,
         envelope_to: &[&EmailAddress],
         raw_email: &str,
-    ) -> Result<(), BackendError> {
+    ) -> Result<(), Report> {
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .create(true)
             .open(&self.path)
-            .context("Failed to open file for writing")?;
+            .map_err(|e| {
+                report!("Failed to open file for writing")
+                    .attach(format!("Path: {}", self.path.display()))
+                    .attach(format!("Error: {}", e))
+            })?;
 
         writeln!(file, "Envelope-From: {}", envelope_from.as_str())?;
         let recipients_str = envelope_to

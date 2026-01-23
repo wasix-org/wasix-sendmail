@@ -29,7 +29,7 @@ pub fn run_sendmail(
         let mut restored_envs = Vec::new();
         for (key, value) in envs {
             let previous_value = std::env::var(key).ok();
-            std::env::set_var(key, value);
+            unsafe { std::env::set_var(key, value) };
             restored_envs.push((key.to_string(), previous_value));
         }
         let parsed_args = match args::SendmailArgs::try_parse_from(args_str) {
@@ -41,8 +41,8 @@ pub fn run_sendmail(
         };
         for (key, value) in restored_envs {
             match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
             }
         }
         parsed_args
@@ -104,7 +104,7 @@ pub fn run_sendmail(
     // Extract From address from headers
     let header_from = parser::header_values(&headers, "From")
         .next()
-        .and_then(|value| parser::parse_mailbox_header(value).ok().flatten());
+        .and_then(|value| parser::parse_mailbox_header(value).ok());
 
     let envelope_from = cli_args
         .from

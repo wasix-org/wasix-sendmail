@@ -1,15 +1,15 @@
-use anyhow::Context;
 use lettre::{
+    SmtpTransport, Transport,
     address::{Address, Envelope},
     transport::smtp::{
         authentication::{Credentials, Mechanism},
         client::{CertificateStore, Tls, TlsParameters},
     },
-    SmtpTransport, Transport,
 };
 use log::{debug, info};
+use rootcause::prelude::*;
 
-use super::{BackendError, EmailBackend};
+use super::EmailBackend;
 use crate::parser::EmailAddress;
 
 pub struct SmtpBackend {
@@ -31,17 +31,21 @@ impl SmtpBackend {
         tls_mode: TlsMode,
         username: Option<String>,
         password: Option<String>,
-    ) -> Result<Self, BackendError> {
+    ) -> Result<Self, Report> {
         info!("SMTP relay backend: creating relay via {}:{}", host, port);
 
         if host.is_empty() {
-            return Err(BackendError::HostNotProvided);
+            return Err(report!("Host not provided"));
         }
 
         let tls_params = TlsParameters::builder(host.clone())
             .certificate_store(CertificateStore::Default)
             .build_rustls()
-            .context("Failed to build certificate store")?;
+            .map_err(|e| {
+                report!("Failed to build certificate store")
+                    .attach(format!("Host: {}", host))
+                    .attach(format!("Error: {}", e))
+            })?;
 
         let tls = match tls_mode {
             TlsMode::Plain => Tls::None,
@@ -51,21 +55,27 @@ impl SmtpBackend {
         };
 
         let mut transport = SmtpTransport::relay(&host)
-            .context("Invalid host name")?
+            .map_err(|e| {
+                report!("Invalid host name")
+                    .attach(format!("Host: {}", host))
+                    .attach(format!("Error: {}", e))
+            })?
             .port(port)
             .tls(tls);
 
         if username.is_some() || password.is_some() {
             debug!("SMTP relay backend: using authentication");
             let (Some(username), Some(password)) = (username, password) else {
-                return Err(BackendError::OnlyUsernameOrPasswordProvided);
+                return Err(report!("Username and password must be provided together"));
             };
             let credentials = Credentials::new(username, password);
             transport = transport
                 .authentication(vec![Mechanism::Plain, Mechanism::Login])
                 .credentials(credentials);
         } else {
-            debug!("SMTP relay backend: not using authentication because no username or password was provided");
+            debug!(
+                "SMTP relay backend: not using authentication because no username or password was provided"
+            );
         };
 
         let transport = transport.build();
@@ -80,7 +90,7 @@ impl EmailBackend for SmtpBackend {
         envelope_from: &EmailAddress,
         envelope_to: &[&EmailAddress],
         raw_email: &str,
-    ) -> Result<(), BackendError> {
+    ) -> Result<(), Report> {
         let raw_email_bytes = raw_email.as_bytes();
 
         let lettre_envelope_to = envelope_to
@@ -92,11 +102,19 @@ impl EmailBackend for SmtpBackend {
         let lettre_envelope_from =
             Address::new(envelope_from.local_part(), envelope_from.domain()).unwrap();
         let lettre_envelope = Envelope::new(Some(lettre_envelope_from), lettre_envelope_to)
-            .context("Failed to create envelope")?;
+            .map_err(|e| {
+                report!("Failed to create envelope")
+                    .attach(format!("From: {}", envelope_from.as_str()))
+                    .attach(format!(
+                        "To: {:?}",
+                        envelope_to.iter().map(|e| e.as_str()).collect::<Vec<_>>()
+                    ))
+                    .attach(format!("Error: {}", e))
+            })?;
 
         self.transport
             .send_raw(&lettre_envelope, raw_email_bytes)
-            .context("Failed to send mail")?;
+            .map_err(|e| report!("Failed to send mail").attach(format!("Error: {}", e)))?;
         Ok(())
     }
 }

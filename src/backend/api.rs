@@ -1,23 +1,29 @@
-use anyhow::Context;
-use log::{debug, info, trace};
+use log::{debug, info};
+use rootcause::prelude::*;
 use url::Url;
 
-use super::{BackendError, EmailBackend};
+use super::EmailBackend;
 use crate::parser::EmailAddress;
 
+#[derive(Debug)]
 pub struct ApiBackend {
-    url: String,
+    url: Url,
     default_sender: EmailAddress,
     token: String,
 }
 
 impl ApiBackend {
-    pub fn new(url: String, sender: EmailAddress, token: String) -> Self {
-        Self {
+    pub fn new(url: String, sender: EmailAddress, token: String) -> Result<Self, Report> {
+        let url = Url::parse(&url).map_err(|e| {
+            report!("Failed to parse API URL")
+                .attach(format!("URL: '{}'", url))
+                .attach(format!("Error: {}", e))
+        })?;
+        Ok(Self {
             url,
             default_sender: sender,
             token,
-        }
+        })
     }
 }
 
@@ -27,15 +33,11 @@ impl EmailBackend for ApiBackend {
         envelope_from: &EmailAddress,
         envelope_to: &[&EmailAddress],
         raw_email: &str,
-    ) -> Result<(), BackendError> {
-        if self.url.is_empty() {
-            return Err(BackendError::ApiUrlNotProvided);
-        }
-
+    ) -> Result<(), Report> {
         // Use envelope_from, converting to string for API
         let sender = envelope_from.as_str();
 
-        let mut url = Url::parse(&self.url).context("Failed to parse API URL")?;
+        let mut url = self.url.clone();
         url.query_pairs_mut().append_pair("sender", sender);
         for recipient in envelope_to {
             url.query_pairs_mut()
@@ -55,10 +57,9 @@ impl EmailBackend for ApiBackend {
                 return Ok(());
             }
             Err(ureq::Error::Transport(e)) => {
-                return Err(BackendError::NetworkError(anyhow::anyhow!(
-                    "HTTP transport error: {}",
-                    e
-                )))
+                return Err(report!("HTTP transport error")
+                    .attach(format!("Error: {}", e))
+                    .attach(format!("URL: {}", url.as_str())));
             }
             Err(ureq::Error::Status(code, resp)) => (code, resp.into_string().ok()),
         };
@@ -82,7 +83,23 @@ impl EmailBackend for ApiBackend {
         let mut error_msg = response_body.unwrap_or(error_msg_from_code.into());
         error_msg.truncate(100);
 
-        return Err(BackendError::ApiBadRequest(error_msg));
+        let error_message = match status {
+            400 => format!("API request failed (400 Bad Request): {}", error_msg),
+            401 => format!("API request failed (401 Unauthorized): {}", error_msg),
+            402 => format!("API request failed (402 Payment Required): {}", error_msg),
+            403 => format!("API request failed (403 Forbidden): {}", error_msg),
+            413 => format!("API request failed (413 Payload Too Large): {}", error_msg),
+            500..=599 => format!(
+                "API request failed ({} Server Error): {}",
+                status, error_msg
+            ),
+            _ => format!("API request failed ({}): {}", status, error_msg),
+        };
+
+        Err(report!(error_message)
+            .attach(format!("Status code: {}", status))
+            .attach(format!("Response body: {}", error_msg))
+            .into_dynamic())
     }
 
     fn default_sender(&self) -> EmailAddress {
@@ -102,8 +119,9 @@ mod tests {
             "https://api.example.com/v1/mail".to_string(),
             EmailAddress::from_str("default@example.com").unwrap(),
             "test-token".to_string(),
-        );
-        assert_eq!(backend.url, "https://api.example.com/v1/mail");
+        )
+        .unwrap();
+        assert_eq!(backend.url.as_str(), "https://api.example.com/v1/mail");
         assert_eq!(
             backend.default_sender,
             EmailAddress::from_str("default@example.com").unwrap()
@@ -117,7 +135,8 @@ mod tests {
             "https://api.example.com/v1/mail".to_string(),
             EmailAddress::from_str("custom@example.com").unwrap(),
             "test-token".to_string(),
-        );
+        )
+        .unwrap();
         let default_sender = backend.default_sender();
         assert_eq!(default_sender.as_str(), "custom@example.com");
     }

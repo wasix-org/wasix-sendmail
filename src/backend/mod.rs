@@ -12,42 +12,7 @@ pub use smtp::SmtpBackend;
 use crate::parser::EmailAddress;
 use crate::{args::BackendConfig, backend::smtp::TlsMode};
 use log::{debug, info, warn};
-
-#[derive(thiserror::Error, Debug)]
-pub enum BackendError {
-    #[error("Host not provided")]
-    HostNotProvided,
-    #[error("From address not provided")]
-    FromNotProvided,
-    #[error("Username and password must be provided together")]
-    OnlyUsernameOrPasswordProvided,
-    #[error("API URL not provided")]
-    ApiUrlNotProvided,
-    #[error("API configuration incomplete: all three variables (SENDMAIL_API_URL, SENDMAIL_API_SENDER, SENDMAIL_API_TOKEN) must be set")]
-    ApiConfigIncomplete,
-    #[error("Invalid default sender address: {0}")]
-    ApiInvalidEmailAddress(String),
-    #[error("No backend configured. Please set one of: SENDMAIL_FILE_PATH, SENDMAIL_RELAY_HOST, or SENDMAIL_API_URL")]
-    NoBackendConfigured,
-    #[error("API request failed (400 Bad Request): {0}")]
-    ApiBadRequest(String),
-    #[error("API request failed (401 Unauthorized): {0}")]
-    ApiUnauthorized(String),
-    #[error("API request failed (402 Payment Required): {0}")]
-    ApiQuotaExceeded(String),
-    #[error("API request failed (403 Forbidden): {0}")]
-    ApiForbidden(String),
-    #[error("API request failed (413 Payload Too Large): {0}")]
-    ApiMessageTooLarge(String),
-    #[error("API request failed ({0} Server Error): {1}")]
-    ApiServerError(u16, String),
-    #[error("API request failed ({0}): {1}")]
-    ApiUnexpectedStatus(u16, String),
-    #[error("{0}")]
-    NetworkError(#[from] anyhow::Error),
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-}
+use rootcause::prelude::*;
 
 /// Backend trait mirroring POSIX sendmail interface.
 ///
@@ -67,7 +32,7 @@ pub trait EmailBackend: Send + Sync {
         envelope_from: &EmailAddress,
         envelope_to: &[&EmailAddress],
         raw_email: &str,
-    ) -> Result<(), BackendError>;
+    ) -> Result<(), Report>;
 
     /// Get the default sender address for this backend.
     ///
@@ -91,7 +56,7 @@ pub trait EmailBackend: Send + Sync {
 ///
 /// If no backend is configured, returns an error.
 /// If sending with the selected backend fails, sendmail fails - no fallback to other backends.
-pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend>, BackendError> {
+pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend>, Report> {
     // Priority 1: File backend
     if let Some(file_path) = &config.file.file_path {
         let path = PathBuf::from(file_path);
@@ -114,8 +79,10 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
 
         // Validate authentication credentials
         if username.is_some() != password.is_some() {
-            warn!("SMTP relay credentials misconfigured: only one of SENDMAIL_RELAY_USER/SENDMAIL_RELAY_PASS is set");
-            return Err(BackendError::OnlyUsernameOrPasswordProvided);
+            warn!(
+                "SMTP relay credentials misconfigured: only one of SENDMAIL_RELAY_USER/SENDMAIL_RELAY_PASS is set"
+            );
+            return Err(report!("Username and password must be provided together"));
         }
 
         return Ok(Box::new(SmtpBackend::new(
@@ -135,23 +102,27 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
     if api_url_set || api_sender_set || api_token_set {
         // Check if all three are set
         if !api_url_set || !api_sender_set || !api_token_set {
-            return Err(BackendError::ApiConfigIncomplete);
+            return Err(report!(
+                "API configuration incomplete: all three variables (SENDMAIL_API_URL, SENDMAIL_API_SENDER, SENDMAIL_API_TOKEN) must be set"
+            ));
         }
 
         info!("Using REST API backend");
         let url = config.api.api_url.as_ref().unwrap().clone();
         let sender = config.api.api_sender.as_ref().unwrap();
         let Ok(sender_email) = EmailAddress::from_str(sender) else {
-            return Err(BackendError::ApiInvalidEmailAddress(sender.clone()));
+            return Err(report!("Invalid default sender address: {}", sender));
         };
         let token = config.api.api_token.as_ref().unwrap().clone();
 
         debug!("API backend: url={}", url);
         debug!("API backend: default sender={}", sender_email);
 
-        return Ok(Box::new(ApiBackend::new(url, sender_email, token)));
+        return Ok(Box::new(ApiBackend::new(url, sender_email, token)?));
     }
 
     // No backend configured - return error
-    Err(BackendError::NoBackendConfigured)
+    Err(report!(
+        "No backend configured. Please set one of: SENDMAIL_FILE_PATH, SENDMAIL_RELAY_HOST, or SENDMAIL_API_URL"
+    ))
 }

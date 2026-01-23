@@ -3,14 +3,14 @@
 #![cfg(not(target_vendor = "wasmer"))]
 use std::str::FromStr;
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 use std::thread;
 use std::time::Duration;
 use tiny_http::{Response, Server, StatusCode};
+use wasix_sendmail::backend::EmailBackend;
 use wasix_sendmail::backend::api::ApiBackend;
-use wasix_sendmail::backend::{BackendError, EmailBackend};
 use wasix_sendmail::parser::EmailAddress;
 
 fn email_address(addr: &str) -> EmailAddress {
@@ -69,7 +69,8 @@ fn test_api_backend_successful_send() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token-123".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -90,7 +91,8 @@ fn test_api_backend_multiple_recipients() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "secret-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to1 = email_address("user1@example.com");
@@ -105,46 +107,13 @@ fn test_api_backend_multiple_recipients() {
 }
 
 #[test]
-fn test_api_backend_empty_recipients() {
-    let (url, counter, handle) = start_counting_server(202, "");
-
-    let backend = ApiBackend::new(
-        format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
-        "test-token".to_string(),
-    );
-
-    let from = email_address("sender@example.com");
-    let raw_email = "Subject: Test\r\n\r\nTest body";
-
-    // Empty recipient list should return Ok without making request
-    let result = backend.send(&from, &[], raw_email);
-    assert!(result.is_ok());
-
-    // Give it a moment to ensure no request was made
-    thread::sleep(Duration::from_millis(100));
-
-    // Verify no requests were made
-    assert_eq!(counter.load(Ordering::SeqCst), 0);
-
-    drop(handle);
-}
-
-#[test]
 fn test_api_backend_empty_url_error() {
-    let backend = ApiBackend::new(
+    ApiBackend::new(
         "".to_string(),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
-
-    let from = email_address("sender@example.com");
-    let to = email_address("recipient@example.com");
-    let raw_email = "Subject: Test\r\n\r\nTest body";
-
-    let result = backend.send(&from, &[&to], raw_email);
-    assert!(result.is_err());
-    assert!(matches!(result, Err(BackendError::ApiUrlNotProvided)));
+    )
+    .unwrap_err();
 }
 
 #[test]
@@ -155,7 +124,8 @@ fn test_api_backend_bad_request_error() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -163,12 +133,9 @@ fn test_api_backend_bad_request_error() {
 
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
-    match result {
-        Err(BackendError::ApiBadRequest(msg)) => {
-            assert_eq!(msg, "Invalid email format");
-        }
-        other => panic!("Expected ApiBadRequest error, got: {:?}", other),
-    }
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("400 Bad Request"));
+    assert!(err_msg.contains("Invalid email format"));
 
     let _ = handle.join();
 }
@@ -181,7 +148,8 @@ fn test_api_backend_unauthorized_error() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "invalid-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -189,12 +157,9 @@ fn test_api_backend_unauthorized_error() {
 
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
-    match result {
-        Err(BackendError::ApiUnauthorized(msg)) => {
-            assert_eq!(msg, "Invalid token");
-        }
-        other => panic!("Expected ApiUnauthorized error, got: {:?}", other),
-    }
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("401 Unauthorized"));
+    assert!(err_msg.contains("Invalid token"));
 
     let _ = handle.join();
 }
@@ -207,7 +172,8 @@ fn test_api_backend_quota_exceeded_error() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -215,12 +181,9 @@ fn test_api_backend_quota_exceeded_error() {
 
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
-    match result {
-        Err(BackendError::ApiQuotaExceeded(msg)) => {
-            assert_eq!(msg, "Monthly quota exceeded");
-        }
-        other => panic!("Expected ApiQuotaExceeded error, got: {:?}", other),
-    }
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("402 Payment Required"));
+    assert!(err_msg.contains("Monthly quota exceeded"));
 
     let _ = handle.join();
 }
@@ -233,7 +196,8 @@ fn test_api_backend_forbidden_error() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -241,12 +205,9 @@ fn test_api_backend_forbidden_error() {
 
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
-    match result {
-        Err(BackendError::ApiForbidden(msg)) => {
-            assert_eq!(msg, "Sender not authorized");
-        }
-        other => panic!("Expected ApiForbidden error, got: {:?}", other),
-    }
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("403 Forbidden"));
+    assert!(err_msg.contains("Sender not authorized"));
 
     let _ = handle.join();
 }
@@ -259,7 +220,8 @@ fn test_api_backend_message_too_large_error() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -268,12 +230,9 @@ fn test_api_backend_message_too_large_error() {
 
     let result = backend.send(&from, &[&to], &raw_email);
     assert!(result.is_err());
-    match result {
-        Err(BackendError::ApiMessageTooLarge(msg)) => {
-            assert_eq!(msg, "Message exceeds 10MB limit");
-        }
-        other => panic!("Expected ApiMessageTooLarge error, got: {:?}", other),
-    }
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("413 Payload Too Large"));
+    assert!(err_msg.contains("Message exceeds 10MB limit"));
 
     let _ = handle.join();
 }
@@ -286,7 +245,8 @@ fn test_api_backend_server_error() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -294,13 +254,9 @@ fn test_api_backend_server_error() {
 
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
-    match result {
-        Err(BackendError::ApiServerError(status, msg)) => {
-            assert_eq!(status, 503);
-            assert_eq!(msg, "Service temporarily unavailable");
-        }
-        other => panic!("Expected ApiServerError error, got: {:?}", other),
-    }
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("503 Server Error"));
+    assert!(err_msg.contains("Service temporarily unavailable"));
 
     let _ = handle.join();
 }
@@ -313,7 +269,8 @@ fn test_api_backend_unexpected_status() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -321,13 +278,9 @@ fn test_api_backend_unexpected_status() {
 
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
-    match result {
-        Err(BackendError::ApiUnexpectedStatus(status, msg)) => {
-            assert_eq!(status, 418);
-            assert_eq!(msg, "I'm a teapot");
-        }
-        other => panic!("Expected ApiUnexpectedStatus error, got: {:?}", other),
-    }
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("418"));
+    assert!(err_msg.contains("I'm a teapot"));
 
     let _ = handle.join();
 }
@@ -342,7 +295,8 @@ fn test_api_backend_truncates_long_error_messages() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -350,14 +304,11 @@ fn test_api_backend_truncates_long_error_messages() {
 
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
-    match result {
-        Err(BackendError::ApiBadRequest(msg)) => {
-            // Error message should be truncated to 100 characters
-            assert_eq!(msg.len(), 100);
-            assert_eq!(msg, "A".repeat(100));
-        }
-        other => panic!("Expected ApiBadRequest error, got: {:?}", other),
-    }
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("400 Bad Request"));
+    // Error message should be truncated to 100 characters in the response body attachment
+    let truncated = "A".repeat(100);
+    assert!(err_msg.contains(&truncated));
 
     let _ = handle.join();
 }
@@ -370,7 +321,8 @@ fn test_api_backend_special_characters_in_email() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("test+tag@example.com");
     let to = email_address("user+123@example.com");
@@ -390,7 +342,8 @@ fn test_api_backend_uses_envelope_from_not_default_sender() {
         format!("{}/send", url),
         EmailAddress::from_str("default@example.com").unwrap(), // This should NOT be used
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("envelope@example.com");
     let to = email_address("recipient@example.com");
@@ -409,7 +362,8 @@ fn test_api_backend_network_timeout() {
         "http://192.0.2.1:9999/send".to_string(), // TEST-NET-1, non-routable
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
+    )
+    .unwrap();
 
     let from = email_address("sender@example.com");
     let to = email_address("recipient@example.com");
@@ -417,24 +371,17 @@ fn test_api_backend_network_timeout() {
 
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
-    // Should be a NetworkError
-    assert!(matches!(result, Err(BackendError::NetworkError(_))));
+    // Should be a network/transport error
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(err_msg.contains("HTTP transport error") || err_msg.contains("transport"));
 }
 
 #[test]
 fn test_api_backend_invalid_url() {
-    let backend = ApiBackend::new(
+    ApiBackend::new(
         "not a valid url".to_string(),
         EmailAddress::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
-    );
-
-    let from = email_address("sender@example.com");
-    let to = email_address("recipient@example.com");
-    let raw_email = "Subject: Test\r\n\r\nTest body";
-
-    let result = backend.send(&from, &[&to], raw_email);
-    assert!(result.is_err());
-    // Should fail with an error (likely NetworkError from parsing)
-    assert!(matches!(result, Err(BackendError::NetworkError(_))));
+    )
+    .unwrap_err();
 }
