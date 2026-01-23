@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 pub use api::ApiBackend;
 pub use file::FileBackend;
+use lettre::Address;
 pub use smtp::SmtpBackend;
 
 use crate::{args::BackendConfig, backend::smtp::TlsMode};
@@ -28,8 +29,8 @@ pub trait EmailBackend: Send + Sync {
     /// * `raw_email` - Raw email content as read from stdin (headers + body)
     fn send(
         &self,
-        envelope_from: &lettre::Address,
-        envelope_to: &[&lettre::Address],
+        envelope_from: &Address,
+        envelope_to: &[&Address],
         raw_email: &str,
     ) -> Result<(), Report>;
 
@@ -37,12 +38,11 @@ pub trait EmailBackend: Send + Sync {
     ///
     /// Returns the default sender email address. For most backends this is
     /// `username@localhost`, but for API backends it returns the configured sender.
-    fn default_sender(&self) -> lettre::Address {
+    fn default_sender(&self) -> Address {
         // TODO: Get the username from the system without using whoami, because that introduces a bunch of weird dependencies.
         let username = "nobody";
         let sender_str = format!("{}@localhost", username);
-        lettre::Address::from_str(&sender_str)
-            .expect("username@localhost should be a valid email address")
+        Address::from_str(&sender_str).expect("username@localhost should be a valid email address")
     }
 }
 
@@ -109,7 +109,7 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
         info!("Using REST API backend");
         let url = config.api.api_url.as_ref().unwrap().clone();
         let sender = config.api.api_sender.as_ref().unwrap();
-        let Ok(sender_email) = lettre::Address::from_str(sender) else {
+        let Ok(sender_email) = Address::from_str(sender) else {
             return Err(report!("Invalid default sender address: {}", sender));
         };
         let token = config.api.api_token.as_ref().unwrap().clone();

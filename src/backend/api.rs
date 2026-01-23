@@ -1,3 +1,4 @@
+use lettre::Address;
 use log::{debug, info};
 use rootcause::prelude::*;
 use url::Url;
@@ -7,12 +8,12 @@ use super::EmailBackend;
 #[derive(Debug)]
 pub struct ApiBackend {
     url: Url,
-    default_sender: lettre::Address,
+    default_sender: Address,
     token: String,
 }
 
 impl ApiBackend {
-    pub fn new(url: String, sender: lettre::Address, token: String) -> Result<Self, Report> {
+    pub fn new(url: String, sender: Address, token: String) -> Result<Self, Report> {
         let url = Url::parse(&url).map_err(|e| {
             report!("Failed to parse API URL")
                 .attach(format!("URL: '{}'", url))
@@ -29,8 +30,8 @@ impl ApiBackend {
 impl EmailBackend for ApiBackend {
     fn send(
         &self,
-        envelope_from: &lettre::Address,
-        envelope_to: &[&lettre::Address],
+        envelope_from: &Address,
+        envelope_to: &[&Address],
         raw_email: &str,
     ) -> Result<(), Report> {
         let mut url = self.url.clone();
@@ -99,7 +100,7 @@ impl EmailBackend for ApiBackend {
             .into_dynamic())
     }
 
-    fn default_sender(&self) -> lettre::Address {
+    fn default_sender(&self) -> Address {
         self.default_sender.clone()
     }
 }
@@ -114,14 +115,14 @@ mod tests {
     fn test_api_backend_creation() {
         let backend = ApiBackend::new(
             "https://api.example.com/v1/mail".to_string(),
-            lettre::Address::from_str("default@example.com").unwrap(),
+            Address::from_str("default@example.com").unwrap(),
             "test-token".to_string(),
         )
         .unwrap();
         assert_eq!(backend.url.as_str(), "https://api.example.com/v1/mail");
         assert_eq!(
             backend.default_sender,
-            lettre::Address::from_str("default@example.com").unwrap()
+            Address::from_str("default@example.com").unwrap()
         );
         assert_eq!(backend.token, "test-token");
     }
@@ -130,7 +131,7 @@ mod tests {
     fn test_api_backend_default_sender() {
         let backend = ApiBackend::new(
             "https://api.example.com/v1/mail".to_string(),
-            lettre::Address::from_str("custom@example.com").unwrap(),
+            Address::from_str("custom@example.com").unwrap(),
             "test-token".to_string(),
         )
         .unwrap();

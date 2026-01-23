@@ -2,7 +2,7 @@ use log::trace;
 use rootcause::prelude::*;
 use std::str::FromStr;
 
-use lettre::message::Mailboxes;
+use lettre::{Address, message::Mailboxes};
 
 /// A parsed email header field with unfolded value
 #[derive(Debug, Clone)]
@@ -63,7 +63,7 @@ pub fn parse_email_headers(email: &str) -> Vec<HeaderField> {
 ///
 /// This function parses header values like "To", "Cc", "Bcc" that contain mailbox lists.
 /// Returns a vector of validated email addresses.
-pub fn parse_mailboxes_header(value: &str) -> Result<Vec<lettre::Address>, Report> {
+pub fn parse_mailboxes_header(value: &str) -> Result<Vec<Address>, Report> {
     let mailboxes: Mailboxes = value
         .parse()
         .map_err(|_| report!("Invalid email address: {}", value))?;
@@ -72,8 +72,7 @@ pub fn parse_mailboxes_header(value: &str) -> Result<Vec<lettre::Address>, Repor
         .iter()
         .map(|mailbox| {
             let addr_str = mailbox.email.to_string();
-            lettre::Address::from_str(&addr_str)
-                .map_err(|_| report!("Invalid email address: {}", addr_str))
+            Address::from_str(&addr_str).map_err(|_| report!("Invalid email address: {}", addr_str))
         })
         .collect()
 }
@@ -82,7 +81,7 @@ pub fn parse_mailboxes_header(value: &str) -> Result<Vec<lettre::Address>, Repor
 ///
 /// This is useful for headers like "From" where we typically want the first address
 /// even if multiple are present.
-pub fn parse_mailbox_header(value: &str) -> Result<lettre::Address, Report> {
+pub fn parse_mailbox_header(value: &str) -> Result<Address, Report> {
     let mut mailboxes = parse_mailboxes_header(value)?;
 
     let mailboxes_len = mailboxes.len();

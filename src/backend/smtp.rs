@@ -1,5 +1,5 @@
 use lettre::{
-    SmtpTransport, Transport,
+    Address, SmtpTransport, Transport,
     address::Envelope,
     transport::smtp::{
         authentication::{Credentials, Mechanism},
@@ -86,8 +86,8 @@ impl SmtpBackend {
 impl EmailBackend for SmtpBackend {
     fn send(
         &self,
-        envelope_from: &lettre::Address,
-        envelope_to: &[&lettre::Address],
+        envelope_from: &Address,
+        envelope_to: &[&Address],
         raw_email: &str,
     ) -> Result<(), Report> {
         let raw_email_bytes = raw_email.as_bytes();
