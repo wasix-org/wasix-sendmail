@@ -11,18 +11,16 @@ pub struct FileBackend {
 impl FileBackend {
     pub fn new(path: PathBuf) -> Result<Self, Report> {
         let path = PathBuf::from(".").join(path);
-        let parent_dir = path
-            .parent()
-            .ok_or_else(|| {
-                report!("Failed to get parent directory of the output file")
-                    .attach(format!("Path: {}", path.display()))
-            })?
-            .canonicalize()
-            .map_err(|e| {
+        let parent_dir = path.parent().ok_or_else(|| {
+            report!("Failed to get parent directory of the output file")
+                .attach(format!("Path: {}", path.display()))
+        })?;
+        if !parent_dir.exists() {
+            return Err(
                 report!("Parent directory of the output file does not exist")
-                    .attach(format!("Path: {}", path.display()))
-                    .attach(format!("Error: {}", e))
-            })?;
+                    .attach(format!("Path: {}", path.display())),
+            );
+        }
         let basename = path.file_name().ok_or_else(|| {
             report!("Failed to get basename of the output file")
                 .attach(format!("Path: {}", path.display()))
