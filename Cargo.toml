@@ -27,7 +27,6 @@ codegen-units = 1
 # panic = "abort" # 5% size reduction, but probably not worth it
 
 [dependencies]
-chumsky = { version = "0.12.0", default-features = false }
 clap = { version = "4.5", features = ["derive", "env"] }
 email_address = "0.2"
 env_logger = "0.11"
