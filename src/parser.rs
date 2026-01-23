@@ -2,8 +2,6 @@ use log::{debug, trace};
 use std::str::FromStr;
 use thiserror::Error;
 
-pub mod email_parser;
-
 pub use email_address::EmailAddress;
 use lettre::message::Mailboxes;
 
