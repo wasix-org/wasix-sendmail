@@ -1,6 +1,6 @@
 use lettre::{
     SmtpTransport, Transport,
-    address::{Address, Envelope},
+    address::Envelope,
     transport::smtp::{
         authentication::{Credentials, Mechanism},
         client::{CertificateStore, Tls, TlsParameters},
@@ -92,20 +92,13 @@ impl EmailBackend for SmtpBackend {
     ) -> Result<(), Report> {
         let raw_email_bytes = raw_email.as_bytes();
 
-        let lettre_envelope_to = envelope_to
-            .iter()
-            .map(|envelope_to| Address::new(envelope_to.user(), envelope_to.domain()).unwrap())
-            .collect::<Vec<_>>();
-        let lettre_envelope_from =
-            Address::new(envelope_from.user(), envelope_from.domain()).unwrap();
+        let lettre_envelope_to = envelope_to.iter().map(|e| (*e).clone()).collect::<Vec<_>>();
+        let lettre_envelope_from = envelope_from.clone();
         let lettre_envelope = Envelope::new(Some(lettre_envelope_from), lettre_envelope_to)
             .map_err(|e| {
                 report!("Failed to create envelope")
                     .attach(format!("From: {}", envelope_from))
-                    .attach(format!(
-                        "To: {:?}",
-                        envelope_to.iter().collect::<Vec<_>>()
-                    ))
+                    .attach(format!("To: {:?}", envelope_to))
                     .attach(format!("Error: {}", e))
             })?;
 
