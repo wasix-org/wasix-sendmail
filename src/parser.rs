@@ -2,7 +2,6 @@ use log::trace;
 use rootcause::prelude::*;
 use std::str::FromStr;
 
-pub use email_address::EmailAddress;
 use lettre::message::Mailboxes;
 
 /// A parsed email header field with unfolded value
@@ -64,7 +63,7 @@ pub fn parse_email_headers(email: &str) -> Vec<HeaderField> {
 ///
 /// This function parses header values like "To", "Cc", "Bcc" that contain mailbox lists.
 /// Returns a vector of validated email addresses.
-pub fn parse_mailboxes_header(value: &str) -> Result<Vec<EmailAddress>, Report> {
+pub fn parse_mailboxes_header(value: &str) -> Result<Vec<lettre::Address>, Report> {
     let mailboxes: Mailboxes = value
         .parse()
         .map_err(|_| report!("Invalid email address: {}", value))?;
@@ -73,7 +72,7 @@ pub fn parse_mailboxes_header(value: &str) -> Result<Vec<EmailAddress>, Report> 
         .iter()
         .map(|mailbox| {
             let addr_str = mailbox.email.to_string();
-            EmailAddress::from_str(&addr_str)
+            lettre::Address::from_str(&addr_str)
                 .map_err(|_| report!("Invalid email address: {}", addr_str))
         })
         .collect()
@@ -83,7 +82,7 @@ pub fn parse_mailboxes_header(value: &str) -> Result<Vec<EmailAddress>, Report> 
 ///
 /// This is useful for headers like "From" where we typically want the first address
 /// even if multiple are present.
-pub fn parse_mailbox_header(value: &str) -> Result<EmailAddress, Report> {
+pub fn parse_mailbox_header(value: &str) -> Result<lettre::Address, Report> {
     let mut mailboxes = parse_mailboxes_header(value)?;
 
     let mailboxes_len = mailboxes.len();
@@ -135,22 +134,22 @@ mod tests {
         let value = "recipient1@example.com, recipient2@example.com";
         let addresses = parse_mailboxes_header(value).unwrap();
         assert_eq!(addresses.len(), 2);
-        assert_eq!(addresses[0].as_str(), "recipient1@example.com");
-        assert_eq!(addresses[1].as_str(), "recipient2@example.com");
+        assert_eq!(addresses[0].to_string(), "recipient1@example.com");
+        assert_eq!(addresses[1].to_string(), "recipient2@example.com");
     }
 
     #[test]
     fn test_parse_mailbox_header() {
         let value = "sender@example.com";
         let address = parse_mailbox_header(value).unwrap();
-        assert_eq!(address.as_str(), "sender@example.com");
+        assert_eq!(address.to_string(), "sender@example.com");
     }
 
     #[test]
     fn test_parse_mailbox_header_with_display_name() {
         let value = "\"Sender Name\" <sender@example.com>";
         let address = parse_mailbox_header(value).unwrap();
-        assert_eq!(address.as_str(), "sender@example.com");
+        assert_eq!(address.to_string(), "sender@example.com");
     }
 
     #[test]
@@ -193,7 +192,7 @@ mod tests {
         let headers = parse_email_headers(email);
         let to_value = header_values(&headers, "To").next().unwrap();
         let addresses = parse_mailboxes_header(to_value).unwrap();
-        let recipient_strs: Vec<&str> = addresses.iter().map(|e| e.as_str()).collect();
+        let recipient_strs: Vec<String> = addresses.iter().map(|e| e.to_string()).collect();
         assert_eq!(recipient_strs, vec!["a@example.com", "b@example.com"]);
     }
 
@@ -203,12 +202,12 @@ mod tests {
         let headers = parse_email_headers(email);
         let from_value = header_values(&headers, "From").next().unwrap();
         let from = parse_mailbox_header(from_value).unwrap();
-        assert_eq!(from.as_str(), "sender@example.com");
+        assert_eq!(from.to_string(), "sender@example.com");
 
         let to_value = header_values(&headers, "To").next().unwrap();
         let to_addresses = parse_mailboxes_header(to_value).unwrap();
         assert_eq!(to_addresses.len(), 1);
-        assert_eq!(to_addresses[0].as_str(), "to@example.com");
+        assert_eq!(to_addresses[0].to_string(), "to@example.com");
     }
 
     #[test]
@@ -218,11 +217,11 @@ mod tests {
         let headers = parse_email_headers(email);
         let from_value = header_values(&headers, "From").next().unwrap();
         let from = parse_mailbox_header(from_value).unwrap();
-        assert_eq!(from.as_str(), "sender@example.com");
+        assert_eq!(from.to_string(), "sender@example.com");
 
         let to_value = header_values(&headers, "To").next().unwrap();
         let addresses = parse_mailboxes_header(to_value).unwrap();
-        let recipient_strs: Vec<&str> = addresses.iter().map(|e| e.as_str()).collect();
+        let recipient_strs: Vec<String> = addresses.iter().map(|e| e.to_string()).collect();
         assert_eq!(recipient_strs, vec!["a@example.com", "b@example.com"]);
     }
 

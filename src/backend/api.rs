@@ -3,17 +3,16 @@ use rootcause::prelude::*;
 use url::Url;
 
 use super::EmailBackend;
-use crate::parser::EmailAddress;
 
 #[derive(Debug)]
 pub struct ApiBackend {
     url: Url,
-    default_sender: EmailAddress,
+    default_sender: lettre::Address,
     token: String,
 }
 
 impl ApiBackend {
-    pub fn new(url: String, sender: EmailAddress, token: String) -> Result<Self, Report> {
+    pub fn new(url: String, sender: lettre::Address, token: String) -> Result<Self, Report> {
         let url = Url::parse(&url).map_err(|e| {
             report!("Failed to parse API URL")
                 .attach(format!("URL: '{}'", url))
@@ -30,18 +29,16 @@ impl ApiBackend {
 impl EmailBackend for ApiBackend {
     fn send(
         &self,
-        envelope_from: &EmailAddress,
-        envelope_to: &[&EmailAddress],
+        envelope_from: &lettre::Address,
+        envelope_to: &[&lettre::Address],
         raw_email: &str,
     ) -> Result<(), Report> {
-        // Use envelope_from, converting to string for API
-        let sender = envelope_from.as_str();
-
         let mut url = self.url.clone();
-        url.query_pairs_mut().append_pair("sender", sender);
+        url.query_pairs_mut()
+            .append_pair("sender", envelope_from.as_ref());
         for recipient in envelope_to {
             url.query_pairs_mut()
-                .append_pair("recipients", recipient.as_str());
+                .append_pair("recipients", recipient.as_ref());
         }
 
         // Send the request with ureq
@@ -102,7 +99,7 @@ impl EmailBackend for ApiBackend {
             .into_dynamic())
     }
 
-    fn default_sender(&self) -> EmailAddress {
+    fn default_sender(&self) -> lettre::Address {
         self.default_sender.clone()
     }
 }
@@ -117,14 +114,14 @@ mod tests {
     fn test_api_backend_creation() {
         let backend = ApiBackend::new(
             "https://api.example.com/v1/mail".to_string(),
-            EmailAddress::from_str("default@example.com").unwrap(),
+            lettre::Address::from_str("default@example.com").unwrap(),
             "test-token".to_string(),
         )
         .unwrap();
         assert_eq!(backend.url.as_str(), "https://api.example.com/v1/mail");
         assert_eq!(
             backend.default_sender,
-            EmailAddress::from_str("default@example.com").unwrap()
+            lettre::Address::from_str("default@example.com").unwrap()
         );
         assert_eq!(backend.token, "test-token");
     }
@@ -133,11 +130,11 @@ mod tests {
     fn test_api_backend_default_sender() {
         let backend = ApiBackend::new(
             "https://api.example.com/v1/mail".to_string(),
-            EmailAddress::from_str("custom@example.com").unwrap(),
+            lettre::Address::from_str("custom@example.com").unwrap(),
             "test-token".to_string(),
         )
         .unwrap();
         let default_sender = backend.default_sender();
-        assert_eq!(default_sender.as_str(), "custom@example.com");
+        assert_eq!(&default_sender.to_string(), "custom@example.com");
     }
 }

@@ -10,7 +10,6 @@ use log::{debug, info};
 use rootcause::prelude::*;
 
 use super::EmailBackend;
-use crate::parser::EmailAddress;
 
 pub struct SmtpBackend {
     transport: SmtpTransport,
@@ -87,27 +86,25 @@ impl SmtpBackend {
 impl EmailBackend for SmtpBackend {
     fn send(
         &self,
-        envelope_from: &EmailAddress,
-        envelope_to: &[&EmailAddress],
+        envelope_from: &lettre::Address,
+        envelope_to: &[&lettre::Address],
         raw_email: &str,
     ) -> Result<(), Report> {
         let raw_email_bytes = raw_email.as_bytes();
 
         let lettre_envelope_to = envelope_to
             .iter()
-            .map(|envelope_to| {
-                Address::new(envelope_to.local_part(), envelope_to.domain()).unwrap()
-            })
+            .map(|envelope_to| Address::new(envelope_to.user(), envelope_to.domain()).unwrap())
             .collect::<Vec<_>>();
         let lettre_envelope_from =
-            Address::new(envelope_from.local_part(), envelope_from.domain()).unwrap();
+            Address::new(envelope_from.user(), envelope_from.domain()).unwrap();
         let lettre_envelope = Envelope::new(Some(lettre_envelope_from), lettre_envelope_to)
             .map_err(|e| {
                 report!("Failed to create envelope")
-                    .attach(format!("From: {}", envelope_from.as_str()))
+                    .attach(format!("From: {}", envelope_from))
                     .attach(format!(
                         "To: {:?}",
-                        envelope_to.iter().map(|e| e.as_str()).collect::<Vec<_>>()
+                        envelope_to.iter().collect::<Vec<_>>()
                     ))
                     .attach(format!("Error: {}", e))
             })?;
@@ -135,6 +132,6 @@ mod tests {
         .unwrap();
         let default_sender = backend.default_sender();
         // The default sender should be username@localhost
-        assert!(default_sender.as_str().ends_with("@localhost"));
+        assert_eq!(default_sender.domain(), "localhost");
     }
 }

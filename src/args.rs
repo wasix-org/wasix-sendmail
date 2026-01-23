@@ -1,10 +1,9 @@
-use crate::parser::EmailAddress;
 use clap::{Args, Parser};
 use std::str::FromStr;
 
 /// Parse an email address from a string for clap
-fn parse_email(s: &str) -> Result<EmailAddress, String> {
-    EmailAddress::from_str(s).map_err(|_| format!("Invalid email address: {}", s))
+fn parse_email(s: &str) -> Result<lettre::Address, String> {
+    lettre::Address::from_str(s).map_err(|_| format!("Invalid email address: {}", s))
 }
 
 #[derive(Parser, Debug)]
@@ -24,7 +23,7 @@ pub struct SendmailArgs {
 
     /// Set the envelope sender address
     #[arg(short = 'f', long = "from", value_name = "ADDRESS", value_parser = parse_email)]
-    pub from: Option<EmailAddress>,
+    pub from: Option<lettre::Address>,
 
     /// Set the full name (display name) for the From header
     #[arg(short = 'F', long = "fullname", value_name = "NAME")]
@@ -36,7 +35,7 @@ pub struct SendmailArgs {
 
     /// Recipient email addresses (ignored when reading recipients from headers)
     #[arg(value_name = "RECIPIENT", value_parser = parse_email)]
-    pub recipients: Vec<EmailAddress>,
+    pub recipients: Vec<lettre::Address>,
 
     #[command(flatten)]
     pub backend_config: BackendConfig,

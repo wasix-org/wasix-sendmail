@@ -1,7 +1,6 @@
 use std::{io::Write, path::PathBuf};
 
 use super::EmailBackend;
-use crate::parser::EmailAddress;
 use rootcause::prelude::*;
 
 pub struct FileBackend {
@@ -38,8 +37,8 @@ impl FileBackend {
 impl EmailBackend for FileBackend {
     fn send(
         &self,
-        envelope_from: &EmailAddress,
-        envelope_to: &[&EmailAddress],
+        envelope_from: &lettre::Address,
+        envelope_to: &[&lettre::Address],
         raw_email: &str,
     ) -> Result<(), Report> {
         let mut file = std::fs::OpenOptions::new()
@@ -52,10 +51,10 @@ impl EmailBackend for FileBackend {
                     .attach(format!("Error: {}", e))
             })?;
 
-        writeln!(file, "Envelope-From: {}", envelope_from.as_str())?;
+        writeln!(file, "Envelope-From: {}", envelope_from)?;
         let recipients_str = envelope_to
             .iter()
-            .map(|e| e.as_str())
+            .map(|e| e.to_string())
             .collect::<Vec<_>>()
             .join(", ");
         writeln!(file, "Envelope-To: {}", recipients_str)?;
@@ -92,8 +91,8 @@ mod tests {
         let raw_email =
             "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nTest body";
 
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
-        let to = EmailAddress::from_str("recipient@example.com").unwrap();
+        let from = lettre::Address::from_str("sender@example.com").unwrap();
+        let to = lettre::Address::from_str("recipient@example.com").unwrap();
         assert!(backend.send(&from, &[&to], raw_email).is_ok());
 
         let content = fs::read_to_string(&temp_file).unwrap();
@@ -111,10 +110,10 @@ mod tests {
         let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender@example.com\nSubject: Test\n\nTest body";
 
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
-        let to1 = EmailAddress::from_str("recipient1@example.com").unwrap();
-        let to2 = EmailAddress::from_str("recipient2@example.com").unwrap();
-        let to3 = EmailAddress::from_str("recipient3@example.com").unwrap();
+        let from = lettre::Address::from_str("sender@example.com").unwrap();
+        let to1 = lettre::Address::from_str("recipient1@example.com").unwrap();
+        let to2 = lettre::Address::from_str("recipient2@example.com").unwrap();
+        let to3 = lettre::Address::from_str("recipient3@example.com").unwrap();
         assert!(backend.send(&from, &[&to1, &to2, &to3], raw_email).is_ok());
 
         let content = fs::read_to_string(&temp_file).unwrap();
@@ -132,7 +131,7 @@ mod tests {
         let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender@example.com\nSubject: Test\n\nTest body";
 
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
+        let from = lettre::Address::from_str("sender@example.com").unwrap();
         assert!(backend.send(&from, &[], raw_email).is_ok());
 
         let content = fs::read_to_string(&temp_file).unwrap();
@@ -149,9 +148,9 @@ mod tests {
         let raw_email1 = "From: sender1@example.com\nSubject: First\n\nFirst email";
         let raw_email2 = "From: sender2@example.com\nSubject: Second\n\nSecond email";
 
-        let from1 = EmailAddress::from_str("sender1@example.com").unwrap();
-        let from2 = EmailAddress::from_str("sender2@example.com").unwrap();
-        let to = EmailAddress::from_str("recipient@example.com").unwrap();
+        let from1 = lettre::Address::from_str("sender1@example.com").unwrap();
+        let from2 = lettre::Address::from_str("sender2@example.com").unwrap();
+        let to = lettre::Address::from_str("recipient@example.com").unwrap();
 
         assert!(backend.send(&from1, &[&to], raw_email1).is_ok());
         assert!(backend.send(&from2, &[&to], raw_email2).is_ok());
@@ -191,8 +190,8 @@ mod tests {
         let raw_email =
             "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nTest body";
 
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
-        let to = EmailAddress::from_str("recipient@example.com").unwrap();
+        let from = lettre::Address::from_str("sender@example.com").unwrap();
+        let to = lettre::Address::from_str("recipient@example.com").unwrap();
         assert!(backend.send(&from, &[&to], raw_email).is_ok());
 
         let content = fs::read_to_string(&temp_file).expect("File should exist after sending");
@@ -224,8 +223,8 @@ mod tests {
         let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\n";
 
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
-        let to = EmailAddress::from_str("recipient@example.com").unwrap();
+        let from = lettre::Address::from_str("sender@example.com").unwrap();
+        let to = lettre::Address::from_str("recipient@example.com").unwrap();
         assert!(backend.send(&from, &[&to], raw_email).is_ok());
 
         let content = fs::read_to_string(&temp_file).unwrap();
@@ -241,8 +240,8 @@ mod tests {
         let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender+test@example.com\nTo: recipient@example.com\nSubject: Test with special chars: !@#$%\n\nBody with special chars: àáâãäå";
 
-        let from = EmailAddress::from_str("sender+test@example.com").unwrap();
-        let to = EmailAddress::from_str("recipient@example.com").unwrap();
+        let from = lettre::Address::from_str("sender+test@example.com").unwrap();
+        let to = lettre::Address::from_str("recipient@example.com").unwrap();
         assert!(backend.send(&from, &[&to], raw_email).is_ok());
 
         let content = fs::read_to_string(&temp_file).unwrap();
@@ -258,8 +257,8 @@ mod tests {
         let backend = FileBackend::new(temp_file.clone()).unwrap();
         let raw_email = "From: sender@example.com\nTo: recipient@example.com\nSubject: Test\n\nLine 1\nLine 2\nLine 3";
 
-        let from = EmailAddress::from_str("sender@example.com").unwrap();
-        let to = EmailAddress::from_str("recipient@example.com").unwrap();
+        let from = lettre::Address::from_str("sender@example.com").unwrap();
+        let to = lettre::Address::from_str("recipient@example.com").unwrap();
         assert!(backend.send(&from, &[&to], raw_email).is_ok());
 
         let content = fs::read_to_string(&temp_file).unwrap();
@@ -276,7 +275,7 @@ mod tests {
         let backend = FileBackend::new(temp_file.clone()).unwrap();
         let default_sender = backend.default_sender();
         // The default sender should be username@localhost
-        assert!(default_sender.as_str().ends_with("@localhost"));
+        assert_eq!(default_sender.domain(), "localhost");
 
         let _ = fs::remove_file(&temp_file);
     }

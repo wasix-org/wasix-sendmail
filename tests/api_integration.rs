@@ -11,10 +11,9 @@ use std::time::Duration;
 use tiny_http::{Response, Server, StatusCode};
 use wasix_sendmail::backend::EmailBackend;
 use wasix_sendmail::backend::api::ApiBackend;
-use wasix_sendmail::parser::EmailAddress;
 
-fn email_address(addr: &str) -> EmailAddress {
-    EmailAddress::from_str(addr).expect("valid email address")
+fn email_address(addr: &str) -> lettre::Address {
+    lettre::Address::from_str(addr).expect("valid email address")
 }
 
 /// Helper to create a simple mock server that responds with a specific status code and body
@@ -67,7 +66,7 @@ fn test_api_backend_successful_send() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token-123".to_string(),
     )
     .unwrap();
@@ -89,7 +88,7 @@ fn test_api_backend_multiple_recipients() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "secret-token".to_string(),
     )
     .unwrap();
@@ -110,7 +109,7 @@ fn test_api_backend_multiple_recipients() {
 fn test_api_backend_empty_url_error() {
     ApiBackend::new(
         "".to_string(),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap_err();
@@ -122,7 +121,7 @@ fn test_api_backend_bad_request_error() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
@@ -146,7 +145,7 @@ fn test_api_backend_unauthorized_error() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "invalid-token".to_string(),
     )
     .unwrap();
@@ -170,7 +169,7 @@ fn test_api_backend_quota_exceeded_error() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
@@ -194,7 +193,7 @@ fn test_api_backend_forbidden_error() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
@@ -218,7 +217,7 @@ fn test_api_backend_message_too_large_error() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
@@ -243,7 +242,7 @@ fn test_api_backend_server_error() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
@@ -267,7 +266,7 @@ fn test_api_backend_unexpected_status() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
@@ -293,7 +292,7 @@ fn test_api_backend_truncates_long_error_messages() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
@@ -319,7 +318,7 @@ fn test_api_backend_special_characters_in_email() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
@@ -340,7 +339,7 @@ fn test_api_backend_uses_envelope_from_not_default_sender() {
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        EmailAddress::from_str("default@example.com").unwrap(), // This should NOT be used
+        lettre::Address::from_str("default@example.com").unwrap(), // This should NOT be used
         "test-token".to_string(),
     )
     .unwrap();
@@ -360,7 +359,7 @@ fn test_api_backend_network_timeout() {
     // Test with an unreachable address (should timeout or fail immediately)
     let backend = ApiBackend::new(
         "http://192.0.2.1:9999/send".to_string(), // TEST-NET-1, non-routable
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
@@ -380,7 +379,7 @@ fn test_api_backend_network_timeout() {
 fn test_api_backend_invalid_url() {
     ApiBackend::new(
         "not a valid url".to_string(),
-        EmailAddress::from_str("default@example.com").unwrap(),
+        lettre::Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap_err();
