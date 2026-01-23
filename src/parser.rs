@@ -90,13 +90,11 @@ pub fn parse_mailbox_header(value: &str) -> Result<EmailAddress, Report> {
     match mailboxes_len {
         0 => Err(report!("No address in the From: header")),
         1 => Ok(mailboxes.pop().unwrap()),
-        _ => {
-            Err(report!(
-                "More than one address in the From: header {:?}\n{}",
-                mailboxes,
-                value
-            ))
-        }
+        _ => Err(report!(
+            "More than one address in the From: header {:?}\n{}",
+            mailboxes,
+            value
+        )),
     }
 }
 

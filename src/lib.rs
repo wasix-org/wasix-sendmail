@@ -9,19 +9,21 @@ pub mod logger;
 pub mod parser;
 
 use clap::Parser;
-use log::{error, info};
+use log::info;
 use parser::EmailAddress;
+use rootcause::prelude::*;
 use uuid::Uuid;
 
 static PARSER_MUTEX: Mutex<()> = Mutex::new(());
 
-pub fn run_sendmail(
+/// Run sendmail and return an error report
+pub fn run_sendmail_err(
     stdin: &mut dyn Read,
     _stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
+    _stderr: &mut dyn Write,
     args: &[String],
     envs: &[(String, String)],
-) -> i32 {
+) -> Result<(), Report> {
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let cli_args = {
         // Mutex to allow running tests in parallel with different environment variables
@@ -32,13 +34,7 @@ pub fn run_sendmail(
             unsafe { std::env::set_var(key, value) };
             restored_envs.push((key.to_string(), previous_value));
         }
-        let parsed_args = match args::SendmailArgs::try_parse_from(args_str) {
-            Ok(args) => args,
-            Err(e) => {
-                let _ = e.print();
-                return 1;
-            }
-        };
+        let parsed_args = args::SendmailArgs::try_parse_from(args_str)?;
         for (key, value) in restored_envs {
             match value {
                 Some(value) => unsafe { std::env::set_var(key, value) },
@@ -52,25 +48,13 @@ pub fn run_sendmail(
 
     // Fail early if no recipients specified and not reading from headers
     if !cli_args.read_recipients_from_headers && cli_args.recipients.is_empty() {
-        let _ = writeln!(stderr, "sendmail: No recipients specified");
-        return 1;
+        return Err(report!("No recipients specified"));
     }
 
-    let backend = match backend::create_from_config(&cli_args.backend_config) {
-        Ok(b) => b,
-        Err(e) => {
-            error!("Failed to create backend: {}", e);
-            let _ = writeln!(stderr, "sendmail: {}", e);
-            return 1;
-        }
-    };
+    let backend = backend::create_from_config(&cli_args.backend_config)?;
 
     let mut raw_email = String::new();
-    if let Err(e) = stdin.read_to_string(&mut raw_email) {
-        error!("Failed to read email from stdin: {}", e);
-        let _ = writeln!(stderr, "sendmail: Failed to read email: {}", e);
-        return 1;
-    }
+    stdin.read_to_string(&mut raw_email)?;
 
     let headers = parser::parse_email_headers(&raw_email);
 
@@ -80,14 +64,8 @@ pub fn run_sendmail(
         let mut header_recipients = Vec::new();
         for header_name in &["To", "Cc", "Bcc"] {
             for value in parser::header_values(&headers, header_name) {
-                match parser::parse_mailboxes_header(value) {
-                    Ok(addrs) => header_recipients.extend(addrs),
-                    Err(e) => {
-                        error!("Failed to parse {} header: {}", header_name, e);
-                        let _ = writeln!(stderr, "sendmail: {}", e);
-                        return 1;
-                    }
-                }
+                let addrs = parser::parse_mailboxes_header(value)?;
+                header_recipients.extend(addrs);
             }
         }
         header_recipients
@@ -97,8 +75,7 @@ pub fn run_sendmail(
 
     // Check again in case the recipients were read from headers
     if recipients.is_empty() {
-        let _ = writeln!(stderr, "sendmail: No recipients specified");
-        return 1;
+        return Err(report!("No recipients specified"));
     }
 
     // Extract From address from headers
@@ -116,11 +93,21 @@ pub fn run_sendmail(
     let raw_email = prepend_headers(&raw_email, &missing_headers);
 
     let recipients_refs: Vec<&EmailAddress> = recipients.iter().collect();
-    match backend.send(&envelope_from, &recipients_refs, &raw_email) {
+    backend.send(&envelope_from, &recipients_refs, &raw_email)?;
+    Ok(())
+}
+
+pub fn run_sendmail(
+    stdin: &mut dyn Read,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    args: &[String],
+    envs: &[(String, String)],
+) -> i32 {
+    match run_sendmail_err(stdin, stdout, stderr, args, envs) {
         Ok(()) => 0,
         Err(e) => {
-            error!("Failed to send email: {:?}", e);
-            let _ = writeln!(stderr, "sendmail: {}", e);
+            writeln!(stderr, "{}", e).unwrap();
             1
         }
     }
