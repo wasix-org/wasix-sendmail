@@ -9,6 +9,8 @@ use lettre::{
 use log::{debug, info};
 use rootcause::prelude::*;
 
+use crate::args::SmtpRelayProtocol;
+
 use super::EmailBackend;
 
 pub struct SmtpBackend {
@@ -27,9 +29,8 @@ impl SmtpBackend {
     pub fn new(
         host: String,
         port: u16,
-        tls_mode: TlsMode,
-        username: Option<String>,
-        password: Option<String>,
+        tls_mode: SmtpRelayProtocol,
+        credentials: Option<(String, String)>,
     ) -> Result<Self, Report> {
         info!("SMTP relay backend: creating relay via {host}:{port}");
 
@@ -47,10 +48,10 @@ impl SmtpBackend {
             })?;
 
         let tls = match tls_mode {
-            TlsMode::Plain => Tls::None,
-            TlsMode::Tls => Tls::Wrapper(tls_params),
-            TlsMode::StartTls => Tls::Required(tls_params),
-            TlsMode::StartTlsIfAvailable => Tls::Opportunistic(tls_params),
+            SmtpRelayProtocol::Plain => Tls::None,
+            SmtpRelayProtocol::Tls => Tls::Wrapper(tls_params),
+            SmtpRelayProtocol::StartTls => Tls::Required(tls_params),
+            SmtpRelayProtocol::Opportunistic => Tls::Opportunistic(tls_params),
         };
 
         let mut transport = SmtpTransport::relay(&host)
@@ -62,11 +63,8 @@ impl SmtpBackend {
             .port(port)
             .tls(tls);
 
-        if username.is_some() || password.is_some() {
+        if let Some((username, password)) = credentials {
             debug!("SMTP relay backend: using authentication");
-            let (Some(username), Some(password)) = (username, password) else {
-                return Err(report!("Username and password must be provided together"));
-            };
             let credentials = Credentials::new(username, password);
             transport = transport
                 .authentication(vec![Mechanism::Plain, Mechanism::Login])
@@ -118,8 +116,7 @@ mod tests {
         let backend = SmtpBackend::new(
             "smtp.example.com".to_string(),
             587,
-            TlsMode::StartTlsIfAvailable,
-            None,
+            SmtpRelayProtocol::Opportunistic,
             None,
         )
         .unwrap();

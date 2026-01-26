@@ -10,8 +10,8 @@ pub use file::FileBackend;
 use lettre::Address;
 pub use smtp::SmtpBackend;
 
-use crate::{args::BackendConfig, backend::smtp::TlsMode};
-use log::{debug, info, warn};
+use crate::args::BackendConfig;
+use log::{debug, info};
 use rootcause::prelude::*;
 
 /// Backend trait mirroring POSIX sendmail interface.
@@ -66,30 +66,20 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
     // Priority 2: SMTP relay
     if let Some(relay_host) = &config.smtp_relay.relay_host {
         info!("Using SMTP relay backend");
-        let port = config.smtp_relay.relay_port.unwrap_or(587);
+        let port = config.smtp_relay.relay_port;
         let proto = config.smtp_relay.relay_proto.clone();
         let username = config.smtp_relay.relay_user.clone();
         let password = config.smtp_relay.relay_pass.clone();
 
-        debug!("SMTP relay: host={relay_host} port={port}");
-        if let Some(p) = &proto {
-            debug!("SMTP relay: protocol={p}");
-        }
+        debug!("SMTP relay: host={relay_host} port={port} proto={proto:?}");
 
-        // Validate authentication credentials
-        if username.is_some() != password.is_some() {
-            warn!(
-                "SMTP relay credentials misconfigured: only one of SENDMAIL_RELAY_USER/SENDMAIL_RELAY_PASS is set"
-            );
-            return Err(report!("Username and password must be provided together"));
-        }
+        let credentials = username.zip(password);
 
         return Ok(Box::new(SmtpBackend::new(
             relay_host.clone(),
             port,
-            TlsMode::StartTlsIfAvailable,
-            username,
-            password,
+            proto,
+            credentials,
         )?));
     }
 

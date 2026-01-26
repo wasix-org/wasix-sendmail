@@ -1,4 +1,4 @@
-use clap::{Args, Parser};
+use clap::{Args, Parser, ValueEnum};
 use lettre::Address;
 use std::{str::FromStr, sync::Mutex};
 
@@ -7,12 +7,42 @@ fn parse_email(s: &str) -> Result<Address, String> {
     Address::from_str(s).map_err(|_| format!("Invalid email address: {s}"))
 }
 
+fn parse_port(s: &str) -> Result<u16, String> {
+    s.parse::<i64>()
+        .map_err(|_| format!("Invalid port: {s}"))
+        .and_then(|port| {
+            if !(1..=65535).contains(&port) {
+                Err(format!("Port must be between 1 and 65535: {port}"))
+            } else {
+                Ok(port as u16)
+            }
+        })
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "sendmail")]
 #[command(about = "Sendmail-compatible mail sending utility")]
 #[command(
     long_about = "A POSIX-compliant sendmail implementation that supports multiple backends for sending email."
 )]
+#[command(group(
+    clap::ArgGroup::new("api_backend")
+        .required(false)
+        .multiple(true)
+        .requires_all(["api_url", "api_sender", "api_token"])
+))]
+#[command(group(
+    clap::ArgGroup::new("relay_backend")
+        .required(false)
+        .multiple(true)
+        .requires_all(["relay_host"])
+))]
+#[command(group(
+    clap::ArgGroup::new("file_backend")
+        .required(false)
+        .multiple(true)
+        .requires_all(["file_path"])
+))]
 pub struct SendmailArgs {
     /// Read recipients from message headers (To, Cc, Bcc)
     #[arg(short = 't', long = "read-recipients")]
@@ -43,6 +73,7 @@ pub struct SendmailArgs {
 }
 
 #[derive(Args, Debug)]
+
 pub struct BackendConfig {
     #[command(flatten)]
     pub file: FileBackendConfig,
@@ -58,31 +89,80 @@ pub struct BackendConfig {
 #[derive(Args, Debug)]
 pub struct FileBackendConfig {
     /// Path to the output file for file backend
-    #[arg(long, env = "SENDMAIL_FILE_PATH")]
+    #[arg(
+        long,
+        env = "SENDMAIL_FILE_PATH",
+        group = "file_backend",
+        help_heading = "File backend"
+    )]
     pub file_path: Option<String>,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum SmtpRelayProtocol {
+    /// Use TLS encryption
+    Tls,
+    /// Use STARTTLS encryption
+    #[clap(name = "starttls")]
+    StartTls,
+    /// Use plain text
+    Plain,
+    /// Attempt STARTTLS if available, otherwise use plain text
+    Opportunistic,
 }
 
 /// SMTP relay backend configuration
 #[derive(Args, Debug)]
 pub struct SmtpRelayConfig {
     /// SMTP relay host
-    #[arg(long, env = "SENDMAIL_RELAY_HOST")]
+    #[arg(
+        long,
+        env = "SENDMAIL_RELAY_HOST",
+        group = "relay_backend",
+        help_heading = "SMTP relay backend"
+    )]
     pub relay_host: Option<String>,
 
     /// SMTP relay port
-    #[arg(long, env = "SENDMAIL_RELAY_PORT")]
-    pub relay_port: Option<u16>,
+    #[arg(
+        long,
+        env = "SENDMAIL_RELAY_PORT",
+        group = "relay_backend",
+        help_heading = "SMTP relay backend",
+        default_value = "587",
+        value_parser = parse_port,
+    )]
+    pub relay_port: u16,
 
     /// SMTP relay protocol (e.g., tls, starttls, plain)
-    #[arg(long, env = "SENDMAIL_RELAY_PROTO")]
-    pub relay_proto: Option<String>,
+    #[arg(
+        long,
+        env = "SENDMAIL_RELAY_PROTO",
+        group = "relay_backend",
+        help_heading = "SMTP relay backend",
+        default_value = "opportunistic"
+    )]
+    pub relay_proto: SmtpRelayProtocol,
 
     /// SMTP relay username
-    #[arg(long, env = "SENDMAIL_RELAY_USER")]
+    #[arg(
+        long,
+        env = "SENDMAIL_RELAY_USER",
+        group = "relay_backend",
+        help_heading = "SMTP relay backend",
+        requires_all = ["relay_pass"]
+    )]
     pub relay_user: Option<String>,
 
     /// SMTP relay password
-    #[arg(long, env = "SENDMAIL_RELAY_PASS")]
+    #[arg(
+        long,
+        env = "SENDMAIL_RELAY_PASS",
+        group = "relay_backend",
+        help_heading = "SMTP relay backend",
+        requires_all = ["relay_user"]
+
+    )]
     pub relay_pass: Option<String>,
 }
 
@@ -90,15 +170,30 @@ pub struct SmtpRelayConfig {
 #[derive(Args, Debug)]
 pub struct ApiBackendConfig {
     /// URL of the mail endpoint
-    #[arg(long, env = "SENDMAIL_API_URL")]
+    #[arg(
+        long,
+        env = "SENDMAIL_API_URL",
+        group = "api_backend",
+        help_heading = "API backend"
+    )]
     pub api_url: Option<String>,
 
     /// Default sender of the mail
-    #[arg(long, env = "SENDMAIL_API_SENDER")]
+    #[arg(
+        long,
+        env = "SENDMAIL_API_SENDER",
+        group = "api_backend",
+        help_heading = "API backend"
+    )]
     pub api_sender: Option<String>,
 
     /// Token which can be used to identify with the backend server
-    #[arg(long, env = "SENDMAIL_API_TOKEN")]
+    #[arg(
+        long,
+        env = "SENDMAIL_API_TOKEN",
+        group = "api_backend",
+        help_heading = "API backend"
+    )]
     pub api_token: Option<String>,
 }
 

@@ -62,9 +62,7 @@ impl EmailBackend for ApiBackend {
             Err(ureq::Error::Status(code, resp)) => (code, resp.into_string().ok()),
         };
 
-        debug!(
-            "API backend: error with status={status} and message={response_body:?}"
-        );
+        debug!("API backend: error with status={status} and message={response_body:?}");
 
         let error_msg_from_code = match status {
             200..=299 => "Ok",
@@ -86,9 +84,7 @@ impl EmailBackend for ApiBackend {
             402 => format!("API request failed (402 Payment Required): {error_msg}"),
             403 => format!("API request failed (403 Forbidden): {error_msg}"),
             413 => format!("API request failed (413 Payload Too Large): {error_msg}"),
-            500..=599 => format!(
-                "API request failed ({status} Server Error): {error_msg}"
-            ),
+            500..=599 => format!("API request failed ({status} Server Error): {error_msg}"),
             _ => format!("API request failed ({status}): {error_msg}"),
         };
 

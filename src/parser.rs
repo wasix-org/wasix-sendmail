@@ -15,7 +15,7 @@ pub struct HeaderField {
 ///
 /// RFC 5322 specifies that header field bodies can be folded across multiple lines by inserting
 /// CRLF followed by whitespace. Unfolding replaces each CRLF + WSP with a single SP.
-#[must_use] 
+#[must_use]
 pub fn parse_email_headers(email: &str) -> Vec<HeaderField> {
     trace!("Parsing email headers");
     let mut headers: Vec<HeaderField> = Vec::new();
@@ -109,7 +109,7 @@ pub fn header_values<'a>(
 }
 
 /// Check if a header exists (case-insensitive).
-#[must_use] 
+#[must_use]
 pub fn has_header(headers: &[HeaderField], name: &str) -> bool {
     headers.iter().any(|h| h.name.eq_ignore_ascii_case(name))
 }
