@@ -23,8 +23,9 @@ fn parse_port(s: &str) -> Result<u16, String> {
 #[command(name = "sendmail")]
 #[command(about = "Sendmail-compatible mail sending utility")]
 #[command(
-    long_about = "A POSIX-compliant sendmail implementation that supports multiple backends for sending email."
+    long_about = "A sendmail-compatible mail sending utility that supports multiple backends."
 )]
+#[command(after_help = "For more information, see https://github.com/wasix-org/wasix-sendmail")]
 #[command(group(
     clap::ArgGroup::new("api_backend")
         .required(false)
