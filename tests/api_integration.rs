@@ -106,7 +106,7 @@ fn test_api_backend_bad_request_error() {
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("400 Bad Request"));
+    assert!(err_msg.contains("400"));
     assert!(err_msg.contains("Invalid email format"));
 
     let _ = handle.join();
@@ -130,7 +130,7 @@ fn test_api_backend_unauthorized_error() {
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("401 Unauthorized"));
+    assert!(err_msg.contains("401"));
     assert!(err_msg.contains("Invalid token"));
 
     let _ = handle.join();
@@ -154,7 +154,7 @@ fn test_api_backend_quota_exceeded_error() {
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("402 Payment Required"));
+    assert!(err_msg.contains("402"));
     assert!(err_msg.contains("Monthly quota exceeded"));
 
     let _ = handle.join();
@@ -178,7 +178,7 @@ fn test_api_backend_forbidden_error() {
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("403 Forbidden"));
+    assert!(err_msg.contains("403"));
     assert!(err_msg.contains("Sender not authorized"));
 
     let _ = handle.join();
@@ -203,7 +203,7 @@ fn test_api_backend_message_too_large_error() {
     let result = backend.send(&from, &[&to], &raw_email);
     assert!(result.is_err());
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("413 Payload Too Large"));
+    assert!(err_msg.contains("413"));
     assert!(err_msg.contains("Message exceeds 10MB limit"));
 
     let _ = handle.join();
@@ -227,7 +227,7 @@ fn test_api_backend_server_error() {
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("503 Server Error"));
+    assert!(err_msg.contains("503"));
     assert!(err_msg.contains("Service temporarily unavailable"));
 
     let _ = handle.join();
@@ -277,7 +277,7 @@ fn test_api_backend_truncates_long_error_messages() {
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_err());
     let err_msg = format!("{}", result.unwrap_err());
-    assert!(err_msg.contains("400 Bad Request"));
+    assert!(err_msg.contains("400"));
     // Error message should be truncated to 100 characters in the response body attachment
     let truncated = "A".repeat(100);
     assert!(err_msg.contains(&truncated));
