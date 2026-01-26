@@ -122,6 +122,6 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
 
     // No backend configured - return error
     Err(report!(
-        "No backend configured. Please set one of: SENDMAIL_FILE_PATH, SENDMAIL_RELAY_HOST, or SENDMAIL_API_URL"
+        "No backend configured. Please see sendmail --help for configuration options."
     ))
 }
