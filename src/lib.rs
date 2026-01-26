@@ -1,49 +1,32 @@
 use std::{
     io::{Read, Write},
     str::FromStr,
-    sync::Mutex,
 };
 pub mod args;
 pub mod backend;
 pub mod logger;
 pub mod parser;
 
-use clap::Parser;
 use lettre::Address;
 use log::info;
-use rootcause::prelude::*;
+use rootcause::{
+    hooks::{
+        Hooks,
+        builtin_hooks::report_formatter::{DefaultReportFormatter, NodeConfig},
+    },
+    prelude::*,
+};
 use uuid::Uuid;
 
-static PARSER_MUTEX: Mutex<()> = Mutex::new(());
+use crate::args::{SendmailArgs, parse_cli_args};
 
 /// Run sendmail and return an error report
 pub fn run_sendmail_err(
     stdin: &mut dyn Read,
     _stdout: &mut dyn Write,
     _stderr: &mut dyn Write,
-    args: &[String],
-    envs: &[(String, String)],
+    cli_args: SendmailArgs,
 ) -> Result<(), Report> {
-    let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let cli_args = {
-        // Mutex to allow running tests in parallel with different environment variables
-        let _guard = PARSER_MUTEX.lock().unwrap();
-        let mut restored_envs = Vec::new();
-        for (key, value) in envs {
-            let previous_value = std::env::var(key).ok();
-            unsafe { std::env::set_var(key, value) };
-            restored_envs.push((key.to_string(), previous_value));
-        }
-        let parsed_args = args::SendmailArgs::try_parse_from(args_str)?;
-        for (key, value) in restored_envs {
-            match value {
-                Some(value) => unsafe { std::env::set_var(key, value) },
-                None => unsafe { std::env::remove_var(key) },
-            }
-        }
-        parsed_args
-    };
-
     logger::init_logger(cli_args.verbosity);
 
     // Fail early if no recipients specified and not reading from headers
@@ -104,10 +87,30 @@ pub fn run_sendmail(
     args: &[String],
     envs: &[(String, String)],
 ) -> i32 {
-    match run_sendmail_err(stdin, stdout, stderr, args, envs) {
+    let cli_args = match parse_cli_args(args, envs) {
+        Ok(args) => args,
+        Err(e) => {
+            write!(stderr, "{e}").unwrap();
+            return 1;
+        }
+    };
+
+    // Setup error formatting
+    let mut hook = DefaultReportFormatter::ASCII;
+    hook.report_header = "";
+    hook.report_node_standalone_formatting =
+        NodeConfig::new(("", "\n"), ("", "\n"), ("", "\n"), ("", "\n"), "  ");
+    let hooks = if cli_args.verbosity == 0 {
+        Hooks::new_without_locations()
+    } else {
+        Hooks::new()
+    };
+    hooks.report_formatter(hook).replace();
+
+    match run_sendmail_err(stdin, stdout, stderr, cli_args) {
         Ok(()) => 0,
         Err(e) => {
-            writeln!(stderr, "{}", e).unwrap();
+            write!(stderr, "{e}").unwrap();
             1
         }
     }
@@ -126,9 +129,9 @@ fn generate_missing_headers(
         let from_header = match fullname {
             Some(name) => {
                 let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
-                format!("From: \"{}\" <{}>", escaped, from)
+                format!("From: \"{escaped}\" <{from}>")
             }
-            None => format!("From: {}", from),
+            None => format!("From: {from}"),
         };
         headers_to_add.push(from_header);
     }
@@ -175,7 +178,7 @@ fn format_rfc5322_date() -> String {
 fn generate_message_id(from: &Address) -> String {
     let uuid = Uuid::new_v4();
     let domain = from.domain();
-    format!("<{}@{}>", uuid, domain)
+    format!("<{uuid}@{domain}>")
 }
 
 #[cfg(test)]

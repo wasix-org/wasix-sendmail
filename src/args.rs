@@ -1,10 +1,10 @@
 use clap::{Args, Parser};
 use lettre::Address;
-use std::str::FromStr;
+use std::{str::FromStr, sync::Mutex};
 
 /// Parse an email address from a string for clap
 fn parse_email(s: &str) -> Result<Address, String> {
-    Address::from_str(s).map_err(|_| format!("Invalid email address: {}", s))
+    Address::from_str(s).map_err(|_| format!("Invalid email address: {s}"))
 }
 
 #[derive(Parser, Debug)]
@@ -100,4 +100,33 @@ pub struct ApiBackendConfig {
     /// Token which can be used to identify with the backend server
     #[arg(long, env = "SENDMAIL_API_TOKEN")]
     pub api_token: Option<String>,
+}
+
+/// During parsing, we modify the environment variables and restore them after parsing.
+///
+/// The mutex is used to allow running tests in parallel with different environment variables.
+static PARSER_MUTEX: Mutex<()> = Mutex::new(());
+
+/// Parse CLI arguments from environment variables and command line arguments
+pub fn parse_cli_args(
+    args: &[String],
+    envs: &[(String, String)],
+) -> Result<SendmailArgs, clap::Error> {
+    let args_str: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
+
+    let _guard = PARSER_MUTEX.lock().unwrap();
+    let mut restored_envs = Vec::new();
+    for (key, value) in envs {
+        let previous_value = std::env::var(key).ok();
+        unsafe { std::env::set_var(key, value) };
+        restored_envs.push((key.clone(), previous_value));
+    }
+    let parsed_args = SendmailArgs::try_parse_from(args_str);
+    for (key, value) in restored_envs {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+    parsed_args
 }

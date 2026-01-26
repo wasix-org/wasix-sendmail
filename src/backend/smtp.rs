@@ -31,7 +31,7 @@ impl SmtpBackend {
         username: Option<String>,
         password: Option<String>,
     ) -> Result<Self, Report> {
-        info!("SMTP relay backend: creating relay via {}:{}", host, port);
+        info!("SMTP relay backend: creating relay via {host}:{port}");
 
         if host.is_empty() {
             return Err(report!("Host not provided"));
@@ -42,8 +42,8 @@ impl SmtpBackend {
             .build_rustls()
             .map_err(|e| {
                 report!("Failed to build certificate store")
-                    .attach(format!("Host: {}", host))
-                    .attach(format!("Error: {}", e))
+                    .attach(format!("Host: {host}"))
+                    .attach(format!("Error: {e}"))
             })?;
 
         let tls = match tls_mode {
@@ -56,8 +56,8 @@ impl SmtpBackend {
         let mut transport = SmtpTransport::relay(&host)
             .map_err(|e| {
                 report!("Invalid host name")
-                    .attach(format!("Host: {}", host))
-                    .attach(format!("Error: {}", e))
+                    .attach(format!("Host: {host}"))
+                    .attach(format!("Error: {e}"))
             })?
             .port(port)
             .tls(tls);
@@ -75,7 +75,7 @@ impl SmtpBackend {
             debug!(
                 "SMTP relay backend: not using authentication because no username or password was provided"
             );
-        };
+        }
 
         let transport = transport.build();
 
@@ -97,14 +97,14 @@ impl EmailBackend for SmtpBackend {
         let lettre_envelope = Envelope::new(Some(lettre_envelope_from), lettre_envelope_to)
             .map_err(|e| {
                 report!("Failed to create envelope")
-                    .attach(format!("From: {}", envelope_from))
-                    .attach(format!("To: {:?}", envelope_to))
-                    .attach(format!("Error: {}", e))
+                    .attach(format!("From: {envelope_from}"))
+                    .attach(format!("To: {envelope_to:?}"))
+                    .attach(format!("Error: {e}"))
             })?;
 
         self.transport
             .send_raw(&lettre_envelope, raw_email_bytes)
-            .map_err(|e| report!("Failed to send mail").attach(format!("Error: {}", e)))?;
+            .map_err(|e| report!("Failed to send mail").attach(format!("Error: {e}")))?;
         Ok(())
     }
 }

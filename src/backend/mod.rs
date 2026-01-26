@@ -41,7 +41,7 @@ pub trait EmailBackend: Send + Sync {
     fn default_sender(&self) -> Address {
         // TODO: Get the username from the system without using whoami, because that introduces a bunch of weird dependencies.
         let username = "nobody";
-        let sender_str = format!("{}@localhost", username);
+        let sender_str = format!("{username}@localhost");
         Address::from_str(&sender_str).expect("username@localhost should be a valid email address")
     }
 }
@@ -49,9 +49,9 @@ pub trait EmailBackend: Send + Sync {
 /// Create a backend instance based on configuration.
 ///
 /// Backend selection priority order:
-/// 1. File backend (if SENDMAIL_FILE_PATH is set)
-/// 2. SMTP relay (if SENDMAIL_RELAY_HOST is set)
-/// 3. Backend/REST API (if SENDMAIL_API_URL is set)
+/// 1. File backend (if `SENDMAIL_FILE_PATH` is set)
+/// 2. SMTP relay (if `SENDMAIL_RELAY_HOST` is set)
+/// 3. Backend/REST API (if `SENDMAIL_API_URL` is set)
 ///
 /// If no backend is configured, returns an error.
 /// If sending with the selected backend fails, sendmail fails - no fallback to other backends.
@@ -71,9 +71,9 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
         let username = config.smtp_relay.relay_user.clone();
         let password = config.smtp_relay.relay_pass.clone();
 
-        debug!("SMTP relay: host={} port={}", relay_host, port);
+        debug!("SMTP relay: host={relay_host} port={port}");
         if let Some(p) = &proto {
-            debug!("SMTP relay: protocol={}", p);
+            debug!("SMTP relay: protocol={p}");
         }
 
         // Validate authentication credentials
@@ -114,8 +114,8 @@ pub fn create_from_config(config: &BackendConfig) -> Result<Box<dyn EmailBackend
         };
         let token = config.api.api_token.as_ref().unwrap().clone();
 
-        debug!("API backend: url={}", url);
-        debug!("API backend: default sender={}", sender_email);
+        debug!("API backend: url={url}");
+        debug!("API backend: default sender={sender_email}");
 
         return Ok(Box::new(ApiBackend::new(url, sender_email, token)?));
     }

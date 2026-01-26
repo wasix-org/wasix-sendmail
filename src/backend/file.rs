@@ -47,18 +47,18 @@ impl EmailBackend for FileBackend {
             .map_err(|e| {
                 report!("Failed to open file for writing")
                     .attach(format!("Path: {}", self.path.display()))
-                    .attach(format!("Error: {}", e))
+                    .attach(format!("Error: {e}"))
             })?;
 
-        writeln!(file, "Envelope-From: {}", envelope_from)?;
+        writeln!(file, "Envelope-From: {envelope_from}")?;
         let recipients_str = envelope_to
             .iter()
-            .map(|e| e.to_string())
+            .map(std::string::ToString::to_string)
             .collect::<Vec<_>>()
             .join(", ");
-        writeln!(file, "Envelope-To: {}", recipients_str)?;
+        writeln!(file, "Envelope-To: {recipients_str}")?;
         writeln!(file, "---")?;
-        writeln!(file, "{}", raw_email)?;
+        writeln!(file, "{raw_email}")?;
         writeln!(file, "---")?;
         Ok(())
     }
