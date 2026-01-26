@@ -14,11 +14,8 @@ pub struct ApiBackend {
 
 impl ApiBackend {
     pub fn new(url: String, sender: Address, token: String) -> Result<Self, Report> {
-        let url = Url::parse(&url).map_err(|e| {
-            report!("Failed to parse API URL")
-                .attach(format!("URL: '{url}'"))
-                .attach(format!("Error: {e}"))
-        })?;
+        let url = Url::parse(&url)
+            .map_err(|e| report!("Failed to parse API URL: {e}").attach(format!("URL: '{url}'")))?;
         Ok(Self {
             url,
             default_sender: sender,
@@ -49,17 +46,21 @@ impl EmailBackend for ApiBackend {
             .set("Content-Type", "message/rfc822")
             .send_string(raw_email);
 
-        let (status, response_body) = match response {
-            Ok(_) => {
+        let (content_type, status, response_body) = match response {
+            Ok(_response) => {
                 info!("API backend: message accepted for delivery");
                 return Ok(());
             }
             Err(ureq::Error::Transport(e)) => {
-                return Err(report!("HTTP transport error")
-                    .attach(format!("Error: {e}"))
-                    .attach(format!("URL: {}", url.as_str())));
+                return Err(
+                    report!("HTTP transport error: {e}").attach(format!("URL: {}", url.as_str()))
+                );
             }
-            Err(ureq::Error::Status(code, resp)) => (code, resp.into_string().ok()),
+            Err(ureq::Error::Status(code, resp)) => (
+                resp.content_type().to_string(),
+                code,
+                resp.into_string().ok(),
+            ),
         };
 
         debug!("API backend: error with status={status} and message={response_body:?}");
@@ -74,23 +75,28 @@ impl EmailBackend for ApiBackend {
             500..=599 => "Server error",
             _ => "Unknown error",
         };
+        let error_msg_from_code = format!("{status} {error_msg_from_code}");
 
-        let mut error_msg = response_body.unwrap_or(error_msg_from_code.into());
-        error_msg.truncate(100);
-
-        let error_message = match status {
-            400 => format!("API request failed (400 Bad Request): {error_msg}"),
-            401 => format!("API request failed (401 Unauthorized): {error_msg}"),
-            402 => format!("API request failed (402 Payment Required): {error_msg}"),
-            403 => format!("API request failed (403 Forbidden): {error_msg}"),
-            413 => format!("API request failed (413 Payload Too Large): {error_msg}"),
-            500..=599 => format!("API request failed ({status} Server Error): {error_msg}"),
-            _ => format!("API request failed ({status}): {error_msg}"),
+        let error_msg = match content_type.as_str() {
+            "text/plain" => {
+                if let Some(response_body) = response_body {
+                    let mut message = response_body
+                        .lines()
+                        .next()
+                        .unwrap_or(error_msg_from_code.as_str())
+                        .to_string();
+                    message.truncate(100);
+                    message
+                } else {
+                    error_msg_from_code
+                }
+            }
+            _ => error_msg_from_code,
         };
 
-        Err(report!(error_message)
+        Err(report!("API request failed: {error_msg}")
             .attach(format!("Status code: {status}"))
-            .attach(format!("Response body: {error_msg}"))
+            .attach(format!("Content type: {content_type}"))
             .into_dynamic())
     }
 

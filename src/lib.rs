@@ -25,7 +25,7 @@ pub fn run_sendmail_err(
     stdin: &mut dyn Read,
     _stdout: &mut dyn Write,
     _stderr: &mut dyn Write,
-    cli_args: SendmailArgs,
+    cli_args: &SendmailArgs,
 ) -> Result<(), Report> {
     logger::init_logger(cli_args.verbosity);
 
@@ -42,7 +42,7 @@ pub fn run_sendmail_err(
     let headers = parser::parse_email_headers(&raw_email);
 
     // Extract recipients from headers if requested
-    let recipients = if cli_args.read_recipients_from_headers {
+    let recipients: Vec<Address> = if cli_args.read_recipients_from_headers {
         info!("Reading recipients from email headers");
         let mut header_recipients = Vec::new();
         for header_name in &["To", "Cc", "Bcc"] {
@@ -68,6 +68,7 @@ pub fn run_sendmail_err(
 
     let envelope_from = cli_args
         .from
+        .clone()
         .or(header_from)
         .unwrap_or_else(|| Address::from_str("nobody@localhost").unwrap());
 
@@ -107,9 +108,15 @@ pub fn run_sendmail(
     };
     hooks.report_formatter(hook).replace();
 
-    match run_sendmail_err(stdin, stdout, stderr, cli_args) {
+    match run_sendmail_err(stdin, stdout, stderr, &cli_args) {
         Ok(()) => 0,
-        Err(e) => {
+        Err(mut e) => {
+            if cli_args.verbosity == 0 {
+                let attachments = e.attachments_mut();
+                while !attachments.is_empty() {
+                    attachments.pop();
+                }
+            }
             write!(stderr, "{e}").unwrap();
             1
         }

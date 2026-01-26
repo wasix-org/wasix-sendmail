@@ -67,13 +67,17 @@ pub fn parse_email_headers(email: &str) -> Vec<HeaderField> {
 pub fn parse_mailboxes_header(value: &str) -> Result<Vec<Address>, Report> {
     let mailboxes: Mailboxes = value
         .parse()
-        .map_err(|_| report!("Invalid email address: {}", value))?;
+        .map_err(|e| report!("Invalid email address: {e}").attach(format!("Header: {value}")))?;
 
     mailboxes
         .iter()
         .map(|mailbox| {
             let addr_str = mailbox.email.to_string();
-            Address::from_str(&addr_str).map_err(|_| report!("Invalid email address: {}", addr_str))
+            Address::from_str(&addr_str).map_err(|e| {
+                report!("Invalid email address: {e}")
+                    .attach(format!("Address: {addr_str}"))
+                    .attach(format!("Header: {value}"))
+            })
         })
         .collect()
 }
@@ -87,13 +91,12 @@ pub fn parse_mailbox_header(value: &str) -> Result<Address, Report> {
 
     let mailboxes_len = mailboxes.len();
     match mailboxes_len {
-        0 => Err(report!("No address in the From: header")),
+        0 => Err(report!("Empty From: header")),
         1 => Ok(mailboxes.pop().unwrap()),
-        _ => Err(report!(
-            "More than one address in the From: header {:?}\n{}",
-            mailboxes,
-            value
-        )),
+        _ => {
+            Err(report!("More than one address in the From: header")
+                .attach(format!("Header: {value}")))
+        }
     }
 }
 

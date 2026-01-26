@@ -12,13 +12,14 @@ impl FileBackend {
     pub fn new(path: PathBuf) -> Result<Self, Report> {
         let path = PathBuf::from(".").join(path);
         let parent_dir = path.parent().ok_or_else(|| {
-            report!("Failed to get parent directory of the output file")
+            report!("Output file path does not have a parent directory")
                 .attach(format!("Path: {}", path.display()))
         })?;
         if !parent_dir.exists() {
             return Err(
                 report!("Parent directory of the output file does not exist")
-                    .attach(format!("Path: {}", path.display())),
+                    .attach(format!("Path: {}", path.display()))
+                    .attach(format!("Parent: {}", parent_dir.display())),
             );
         }
         let basename = path.file_name().ok_or_else(|| {
@@ -45,9 +46,8 @@ impl EmailBackend for FileBackend {
             .create(true)
             .open(&self.path)
             .map_err(|e| {
-                report!("Failed to open file for writing")
+                report!("Failed to open file for writing: {e}")
                     .attach(format!("Path: {}", self.path.display()))
-                    .attach(format!("Error: {e}"))
             })?;
 
         writeln!(file, "Envelope-From: {envelope_from}")?;
