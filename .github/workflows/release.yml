@@ -186,7 +186,7 @@ jobs:
   publish-release:
     name: Create Release
     if: github.event_name != 'pull_request'
-    needs: [build-webc, publish-webc] # TODO: Add publish-crates-io when we no longer rely on git dependencies
+    needs: [verify-version, build-webc, publish-webc] # TODO: Add publish-crates-io when we no longer rely on git dependencies
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -202,6 +202,6 @@ jobs:
           tag_name: v${{ needs.verify-version.outputs.version }}
           files: |
             sendmail.webc
-          draft: true
+          draft: false
           prerelease: false
           generate_release_notes: true
