@@ -9,10 +9,12 @@ A sendmail-compatible email sender with multiple backends.
 
 ## Building for WASIX
 
+You need a wasix toolchain installed for this to work. Run `cargo install cargo-wasix` or follow the instructions at <https://github.com/wasix-org/cargo-wasix>.
+
 Build the WASM module:
 
 ```bash
-cargo build --release --target=wasm32-wasmer-wasi
+cargo +wasix build --release --target=wasm32-wasmer-wasi
 ```
 
 This compiles the project to `target/wasm32-wasmer-wasi/release/sendmail.wasm`. You can then run that binary either directly or via the supplied `wasmer.toml` (`wasmer run .`)
@@ -72,3 +74,11 @@ For sending via a custom REST API:
 **Note:** If no backend is configured, sendmail will exit with an error.
 
 All three API variables must be set for the REST API backend to be used.
+
+## Preparing a release
+
+Releases to [`sendmail/sendmail`](https://wasmer.io/sendmail/sendmail) are only done via GitHub actions. To make a release follow these steps:
+
+1. Create a PR to bump the version named `release/0.0.0` (with the correct version)
+2. Verify that the CI for that branch passes and merge it.
+3. Manually tag the merge commit with `v0.0.0` and push the tag. This will trigger CI to make a release.
