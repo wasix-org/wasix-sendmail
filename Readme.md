@@ -14,7 +14,7 @@ You need a wasix toolchain installed for this to work. Run `cargo install cargo-
 Build the WASM module:
 
 ```bash
-cargo +wasix build --release --target=wasm32-wasmer-wasi
+cargo wasix build --release
 ```
 
 This compiles the project to `target/wasm32-wasmer-wasi/release/sendmail.wasm`. You can then run that binary either directly or via the supplied `wasmer.toml` (`wasmer run .`)
