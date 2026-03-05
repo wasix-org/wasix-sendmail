@@ -41,7 +41,7 @@ impl EmailBackend for ApiBackend {
 
         // Send the request with ureq
         let response = ureq::post(url.as_str())
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(120))
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Content-Type", "message/rfc822")
             .send_string(raw_email);
