@@ -1,7 +1,4 @@
-use std::{
-    io::{Read, Write},
-    str::FromStr,
-};
+use std::io::{Read, Write};
 pub mod args;
 pub mod backend;
 pub mod logger;
@@ -70,7 +67,7 @@ pub fn run_sendmail_err(
         .from
         .clone()
         .or(header_from)
-        .unwrap_or_else(|| Address::from_str("nobody@localhost").unwrap());
+        .unwrap_or_else(|| backend.default_sender());
 
     let missing_headers =
         generate_missing_headers(&headers, &envelope_from, cli_args.fullname.as_deref());
