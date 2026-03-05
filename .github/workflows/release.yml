@@ -164,7 +164,7 @@ jobs:
           sed -i 's|target/wasm32-wasmer-wasi/release/sendmail.wasm|modules/sendmail|' sendmail/wasmer.toml
           wasmer package publish sendmail --registry wasmer.io --token "${{ secrets.WASMER_CIUSER_PROD_TOKEN }}" --namespace sendmail --name sendmail
           wasmer package publish sendmail --registry wasmer.wtf --token "${{ secrets.WASMER_CIUSER_DEV_TOKEN }}" --namespace sendmail --name sendmail
-          wasmer package publish sendmail --registry https://registry.wasmer.fun/registry --token "${{ secrets.WASMER_CIUSER_BUGT_TOKEN }}" --namespace sendmail --name sendmail
+          wasmer package publish sendmail --registry https://registry.wasmer.fun/graphql --token "${{ secrets.WASMER_CIUSER_BUGT_TOKEN }}" --namespace sendmail --name sendmail
 
   # TODO: Uncomment this when we no longer rely on git dependencies
   # publish-crates-io:
