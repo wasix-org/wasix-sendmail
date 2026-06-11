@@ -27,24 +27,27 @@ impl ApiBackend {
 impl EmailBackend for ApiBackend {
     fn send(
         &self,
-        envelope_from: &Address,
+        _envelope_from: &Address,
         envelope_to: &[&Address],
         raw_email: &str,
     ) -> Result<(), Report> {
+        let sender = &self.default_sender;
+
         let mut url = self.url.clone();
-        url.query_pairs_mut()
-            .append_pair("sender", envelope_from.as_ref());
+        url.query_pairs_mut().append_pair("sender", sender.as_ref());
         for recipient in envelope_to {
             url.query_pairs_mut()
                 .append_pair("recipients", recipient.as_ref());
         }
+
+        let raw_email = rewrite_from_header(raw_email, sender);
 
         // Send the request with ureq
         let response = ureq::post(url.as_str())
             .timeout(std::time::Duration::from_secs(120))
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Content-Type", "message/rfc822")
-            .send_string(raw_email);
+            .send_string(raw_email.as_str());
 
         let (content_type, status, response_body) = match response {
             Ok(_response) => {
@@ -105,6 +108,55 @@ impl EmailBackend for ApiBackend {
     }
 }
 
+fn rewrite_from_header(raw_email: &str, sender: &Address) -> String {
+    let (headers, separator, body) = if let Some(pos) = raw_email.find("\r\n\r\n") {
+        (&raw_email[..pos], "\r\n\r\n", &raw_email[pos + 4..])
+    } else if let Some(pos) = raw_email.find("\n\n") {
+        (&raw_email[..pos], "\n\n", &raw_email[pos + 2..])
+    } else {
+        (raw_email, "", "")
+    };
+
+    let newline = if headers.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let replacement = format!("From: {sender}");
+    let mut rewritten = Vec::new();
+    let mut found_from = false;
+    let mut skipping_from_continuation = false;
+
+    for line in headers.split(newline) {
+        let is_continuation = line.starts_with(' ') || line.starts_with('\t');
+
+        if skipping_from_continuation && is_continuation {
+            continue;
+        }
+        skipping_from_continuation = false;
+
+        if !is_continuation
+            && let Some((name, _)) = line.split_once(':')
+            && !found_from
+            && name.eq_ignore_ascii_case("From")
+        {
+            rewritten.push(replacement.as_str());
+            found_from = true;
+            skipping_from_continuation = true;
+            continue;
+        }
+
+        rewritten.push(line);
+    }
+
+    if !found_from {
+        rewritten.insert(0, replacement.as_str());
+    }
+
+    let headers = rewritten.join(newline);
+    format!("{headers}{separator}{body}")
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -137,5 +189,45 @@ mod tests {
         .unwrap();
         let default_sender = backend.default_sender();
         assert_eq!(&default_sender.to_string(), "custom@example.com");
+    }
+
+    #[test]
+    fn rewrite_from_header_replaces_case_insensitive_from() {
+        let sender = Address::from_str("provisioned@example.com").unwrap();
+        let raw_email = "fRoM: Old Name <old@example.com>\nSubject: Test\n\nBody";
+
+        let rewritten = rewrite_from_header(raw_email, &sender);
+
+        assert_eq!(
+            rewritten,
+            "From: provisioned@example.com\nSubject: Test\n\nBody"
+        );
+    }
+
+    #[test]
+    fn rewrite_from_header_removes_folded_from_continuations() {
+        let sender = Address::from_str("provisioned@example.com").unwrap();
+        let raw_email = "From: Old Name\n <old@example.com>\nSubject: Test\n\nBody";
+
+        let rewritten = rewrite_from_header(raw_email, &sender);
+
+        assert_eq!(
+            rewritten,
+            "From: provisioned@example.com\nSubject: Test\n\nBody"
+        );
+        assert!(!rewritten.contains("old@example.com"));
+    }
+
+    #[test]
+    fn rewrite_from_header_does_not_touch_body_from_text() {
+        let sender = Address::from_str("provisioned@example.com").unwrap();
+        let raw_email = "Subject: Test\n\nFrom: this is body text";
+
+        let rewritten = rewrite_from_header(raw_email, &sender);
+
+        assert_eq!(
+            rewritten,
+            "From: provisioned@example.com\nSubject: Test\n\nFrom: this is body text"
+        );
     }
 }
