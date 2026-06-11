@@ -355,6 +355,18 @@ fn assert_query_sender(request_url: &str, expected_sender: &str) {
     assert_eq!(sender.as_deref(), Some(expected_sender));
 }
 
+fn assert_no_bare_lf(value: &str) {
+    let bytes = value.as_bytes();
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte == b'\n' {
+            assert!(
+                index > 0 && bytes[index - 1] == b'\r',
+                "found bare LF at byte {index}: {value:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn test_api_backend_uses_default_sender_not_envelope_from() {
     let (url, rx, handle) = start_capturing_mock_server(202, "");
@@ -378,6 +390,8 @@ fn test_api_backend_uses_default_sender_not_envelope_from() {
     assert!(!request.url.contains("sender=envelope%40example.com"));
     assert!(request.body.contains("From: default@example.com"));
     assert!(!request.body.contains("From: envelope@example.com"));
+    assert!(request.body.contains("\r\nSubject: Test\r\n"));
+    assert_no_bare_lf(&request.body);
 
     let _ = handle.join();
 }
@@ -406,8 +420,9 @@ fn test_api_backend_rewrites_existing_from_header() {
     assert!(request.body.contains("From: provisioned@example.com"));
     assert!(!request.body.contains("From: wordpress@site.example"));
     assert!(request.body.contains("To: recipient@example.com"));
-    assert!(request.body.contains("Subject: Test"));
+    assert!(request.body.contains("\r\nSubject: Test\r\n"));
     assert!(request.body.contains("Body"));
+    assert_no_bare_lf(&request.body);
 
     let _ = handle.join();
 }
@@ -432,9 +447,49 @@ fn test_api_backend_adds_missing_from_header() {
 
     let request = rx.recv_timeout(Duration::from_secs(1)).unwrap();
     assert_query_sender(&request.url, "provisioned@example.com");
-    assert!(request.body.starts_with("From: provisioned@example.com\n"));
-    assert!(request.body.contains("Subject: Test"));
+    assert!(
+        request
+            .body
+            .starts_with("From: provisioned@example.com\r\n")
+    );
+    assert!(request.body.contains("\r\nSubject: Test\r\n"));
     assert!(request.body.contains("Body"));
+    assert_no_bare_lf(&request.body);
+
+    let _ = handle.join();
+}
+
+#[test]
+fn run_sendmail_api_normalizes_lf_only_message_to_crlf() {
+    let (url, rx, handle) = start_capturing_mock_server(202, "");
+
+    let args = vec!["sendmail".to_string(), "-t".to_string(), "-i".to_string()];
+    let envs = vec![
+        ("SENDMAIL_API_URL".to_string(), format!("{url}/send")),
+        (
+            "SENDMAIL_API_SENDER".to_string(),
+            "provisioned@example.com".to_string(),
+        ),
+        ("SENDMAIL_API_TOKEN".to_string(), "test-token".to_string()),
+    ];
+    let email = "From: WordPress <wordpress@site.example>\nTo: recipient@example.com\nSubject: Test\nDate: Thu, 26 Feb 2026 10:00:00 +0000\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 7bit\n\nEmail Body\n";
+
+    let mut stdin = std::io::Cursor::new(email.as_bytes().to_vec());
+    let mut stdout = Vec::<u8>::new();
+    let mut stderr = Vec::<u8>::new();
+
+    let rc = wasix_sendmail::run_sendmail(&mut stdin, &mut stdout, &mut stderr, &args, &envs);
+
+    assert_eq!(rc, 0, "stderr: {}", String::from_utf8_lossy(&stderr));
+
+    let request = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_query_sender(&request.url, "provisioned@example.com");
+    assert!(request.body.contains("From: provisioned@example.com\r\n"));
+    assert!(!request.body.contains("wordpress@site.example"));
+    assert!(request.body.contains("\r\nTo: recipient@example.com\r\n"));
+    assert!(request.body.contains("\r\nSubject: Test\r\n"));
+    assert!(request.body.contains("\r\n\r\nEmail Body\r\n"));
+    assert_no_bare_lf(&request.body);
 
     let _ = handle.join();
 }

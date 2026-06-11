@@ -41,6 +41,7 @@ impl EmailBackend for ApiBackend {
         }
 
         let raw_email = rewrite_from_header(raw_email, sender);
+        let raw_email = normalize_rfc822_line_endings(&raw_email);
 
         // Send the request with ureq
         let response = ureq::post(url.as_str())
@@ -127,7 +128,7 @@ fn rewrite_from_header(raw_email: &str, sender: &Address) -> String {
     let mut found_from = false;
     let mut skipping_from_continuation = false;
 
-    for line in headers.split(newline) {
+    for line in headers.lines() {
         let is_continuation = line.starts_with(' ') || line.starts_with('\t');
 
         if skipping_from_continuation && is_continuation {
@@ -155,6 +156,13 @@ fn rewrite_from_header(raw_email: &str, sender: &Address) -> String {
 
     let headers = rewritten.join(newline);
     format!("{headers}{separator}{body}")
+}
+
+fn normalize_rfc822_line_endings(raw_email: &str) -> String {
+    raw_email
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\n', "\r\n")
 }
 
 #[cfg(test)]
@@ -228,6 +236,47 @@ mod tests {
         assert_eq!(
             rewritten,
             "From: provisioned@example.com\nSubject: Test\n\nFrom: this is body text"
+        );
+    }
+
+    #[test]
+    fn rewrite_from_header_preserves_headers_with_mixed_line_endings() {
+        let sender = Address::from_str("provisioned@example.com").unwrap();
+        let raw_email = "Message-ID: <x@example.com>\r\nFrom: WordPress <wordpress@site.example>\nTo: recipient@example.com\nSubject: Test\n\nEmail Body";
+
+        let rewritten = rewrite_from_header(raw_email, &sender);
+
+        assert!(rewritten.contains("From: provisioned@example.com"));
+        assert!(!rewritten.contains("wordpress@site.example"));
+        assert!(rewritten.contains("To: recipient@example.com"));
+        assert!(rewritten.contains("Subject: Test"));
+        assert!(rewritten.contains("Email Body"));
+    }
+
+    #[test]
+    fn normalize_rfc822_line_endings_converts_lf_to_crlf() {
+        let raw = "From: a@example.com\nSubject: Test\n\nBody\n";
+        let normalized = normalize_rfc822_line_endings(raw);
+        assert_eq!(
+            normalized,
+            "From: a@example.com\r\nSubject: Test\r\n\r\nBody\r\n"
+        );
+    }
+
+    #[test]
+    fn normalize_rfc822_line_endings_does_not_double_existing_crlf() {
+        let raw = "From: a@example.com\r\nSubject: Test\r\n\r\nBody\r\n";
+        let normalized = normalize_rfc822_line_endings(raw);
+        assert_eq!(normalized, raw);
+    }
+
+    #[test]
+    fn normalize_rfc822_line_endings_handles_mixed_endings() {
+        let raw = "From: a@example.com\r\nSubject: Test\n\nBody\r";
+        let normalized = normalize_rfc822_line_endings(raw);
+        assert_eq!(
+            normalized,
+            "From: a@example.com\r\nSubject: Test\r\n\r\nBody\r\n"
         );
     }
 }
