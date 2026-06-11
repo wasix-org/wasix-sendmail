@@ -21,6 +21,7 @@ fn parse_port(s: &str) -> Result<u16, String> {
 
 #[derive(Parser, Debug)]
 #[command(name = "sendmail")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "Sendmail-compatible mail sending utility")]
 #[command(
     long_about = "A sendmail-compatible mail sending utility that supports multiple backends."

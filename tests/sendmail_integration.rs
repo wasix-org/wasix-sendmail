@@ -44,6 +44,23 @@ fn envs_for_file_backend(path: &std::path::Path) -> Vec<(String, String)> {
 }
 
 #[test]
+fn common_version_prints_package_version_and_exits_successfully() {
+    let args = vec!["sendmail".to_string(), "--version".to_string()];
+    let envs = Vec::new();
+    let mut stdin = Cursor::new(Vec::<u8>::new());
+    let mut stdout = Vec::<u8>::new();
+    let mut stderr = Vec::<u8>::new();
+
+    let rc = wasix_sendmail::run_sendmail(&mut stdin, &mut stdout, &mut stderr, &args, &envs);
+
+    assert_eq!(rc, 0);
+    assert_eq!(String::from_utf8_lossy(&stderr), "");
+    let stdout = String::from_utf8_lossy(&stdout);
+    assert!(stdout.contains("sendmail"));
+    assert!(stdout.contains(env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
 fn common_cli_recipient_defaults_from() {
     let out = unique_temp_file("common_cli_recipient_defaults_from");
     let envs = envs_for_file_backend(&out);

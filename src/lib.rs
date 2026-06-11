@@ -4,6 +4,7 @@ pub mod backend;
 pub mod logger;
 pub mod parser;
 
+use clap::error::ErrorKind;
 use lettre::Address;
 use log::info;
 use rootcause::{
@@ -88,8 +89,16 @@ pub fn run_sendmail(
     let cli_args = match parse_cli_args(args, envs) {
         Ok(args) => args,
         Err(e) => {
-            write!(stderr, "{e}").unwrap();
-            return 1;
+            let exit_code = e.exit_code();
+            match e.kind() {
+                ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+                    write!(stdout, "{e}").unwrap();
+                }
+                _ => {
+                    write!(stderr, "{e}").unwrap();
+                }
+            }
+            return exit_code;
         }
     };
 
