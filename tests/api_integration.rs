@@ -4,6 +4,7 @@
 use lettre::Address;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use tiny_http::{Response, Server, StatusCode};
@@ -31,6 +32,45 @@ fn start_mock_server(status: u16, body: &'static str) -> (String, thread::JoinHa
     thread::sleep(Duration::from_millis(50));
 
     (url, handle)
+}
+
+struct CapturedRequest {
+    url: String,
+    body: String,
+}
+
+fn start_capturing_mock_server(
+    status: u16,
+    body: &'static str,
+) -> (
+    String,
+    mpsc::Receiver<CapturedRequest>,
+    thread::JoinHandle<()>,
+) {
+    let server = Arc::new(Server::http("127.0.0.1:0").unwrap());
+    let addr = server.server_addr().to_string();
+    let url = format!("http://{}", addr);
+    let (tx, rx) = mpsc::channel();
+
+    let handle = thread::spawn(move || {
+        if let Ok(Some(mut request)) = server.recv_timeout(Duration::from_secs(2)) {
+            let url = request.url().to_string();
+            let mut request_body = String::new();
+            let _ = request.as_reader().read_to_string(&mut request_body);
+            let _ = tx.send(CapturedRequest {
+                url,
+                body: request_body,
+            });
+
+            let response = Response::from_string(body).with_status_code(StatusCode(status));
+            let _ = request.respond(response);
+        }
+    });
+
+    // Give server time to start
+    thread::sleep(Duration::from_millis(50));
+
+    (url, rx, handle)
 }
 
 #[test]
@@ -306,23 +346,95 @@ fn test_api_backend_special_characters_in_email() {
     let _ = handle.join();
 }
 
+fn assert_query_sender(request_url: &str, expected_sender: &str) {
+    let url = url::Url::parse(&format!("http://localhost{request_url}")).unwrap();
+    let sender = url
+        .query_pairs()
+        .find_map(|(name, value)| (name == "sender").then(|| value.into_owned()));
+
+    assert_eq!(sender.as_deref(), Some(expected_sender));
+}
+
 #[test]
-fn test_api_backend_uses_envelope_from_not_default_sender() {
-    let (url, handle) = start_mock_server(202, "");
+fn test_api_backend_uses_default_sender_not_envelope_from() {
+    let (url, rx, handle) = start_capturing_mock_server(202, "");
 
     let backend = ApiBackend::new(
         format!("{}/send", url),
-        Address::from_str("default@example.com").unwrap(), // This should NOT be used
+        Address::from_str("default@example.com").unwrap(),
         "test-token".to_string(),
     )
     .unwrap();
 
     let from = email_address("envelope@example.com");
     let to = email_address("recipient@example.com");
-    let raw_email = "Subject: Test\r\n\r\nTest body";
+    let raw_email = "From: envelope@example.com\r\nSubject: Test\r\n\r\nTest body";
 
     let result = backend.send(&from, &[&to], raw_email);
     assert!(result.is_ok());
+
+    let request = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_query_sender(&request.url, "default@example.com");
+    assert!(!request.url.contains("sender=envelope%40example.com"));
+    assert!(request.body.contains("From: default@example.com"));
+    assert!(!request.body.contains("From: envelope@example.com"));
+
+    let _ = handle.join();
+}
+
+#[test]
+fn test_api_backend_rewrites_existing_from_header() {
+    let (url, rx, handle) = start_capturing_mock_server(202, "");
+
+    let backend = ApiBackend::new(
+        format!("{}/send", url),
+        Address::from_str("provisioned@example.com").unwrap(),
+        "test-token".to_string(),
+    )
+    .unwrap();
+
+    let from = email_address("wordpress@site.example");
+    let to = email_address("recipient@example.com");
+    let raw_email =
+        "From: wordpress@site.example\nTo: recipient@example.com\nSubject: Test\n\nBody";
+
+    let result = backend.send(&from, &[&to], raw_email);
+    assert!(result.is_ok());
+
+    let request = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_query_sender(&request.url, "provisioned@example.com");
+    assert!(request.body.contains("From: provisioned@example.com"));
+    assert!(!request.body.contains("From: wordpress@site.example"));
+    assert!(request.body.contains("To: recipient@example.com"));
+    assert!(request.body.contains("Subject: Test"));
+    assert!(request.body.contains("Body"));
+
+    let _ = handle.join();
+}
+
+#[test]
+fn test_api_backend_adds_missing_from_header() {
+    let (url, rx, handle) = start_capturing_mock_server(202, "");
+
+    let backend = ApiBackend::new(
+        format!("{}/send", url),
+        Address::from_str("provisioned@example.com").unwrap(),
+        "test-token".to_string(),
+    )
+    .unwrap();
+
+    let from = email_address("envelope@example.com");
+    let to = email_address("recipient@example.com");
+    let raw_email = "Subject: Test\n\nBody";
+
+    let result = backend.send(&from, &[&to], raw_email);
+    assert!(result.is_ok());
+
+    let request = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_query_sender(&request.url, "provisioned@example.com");
+    assert!(request.body.starts_with("From: provisioned@example.com\n"));
+    assert!(request.body.contains("Subject: Test"));
+    assert!(request.body.contains("Body"));
 
     let _ = handle.join();
 }
